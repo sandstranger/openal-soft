@@ -74,11 +74,11 @@ constinit auto MixHrtfBlendSamples = HrtfMixerBlendFunc{MixHrtfBlend_C};
 auto SelectMixer() -> MixerOutFunc
 {
 #if HAVE_NEON
-    if((CPUCapFlags&CPU_CAP_NEON))
+    if(CPUCapFlags.test(CPUCap::NEON))
         return Mix_NEON;
 #endif
 #if HAVE_SSE
-    if((CPUCapFlags&CPU_CAP_SSE))
+    if(CPUCapFlags.test(CPUCap::SSE))
         return Mix_SSE;
 #endif
     return Mix_C;
@@ -88,11 +88,11 @@ auto SelectMixer() -> MixerOutFunc
 auto SelectMixerOne() -> MixerOneFunc
 {
 #if HAVE_NEON
-    if((CPUCapFlags&CPU_CAP_NEON))
+    if(CPUCapFlags.test(CPUCap::NEON))
         return Mix_NEON;
 #endif
 #if HAVE_SSE
-    if((CPUCapFlags&CPU_CAP_SSE))
+    if(CPUCapFlags.test(CPUCap::SSE))
         return Mix_SSE;
 #endif
     return Mix_C;
@@ -101,11 +101,11 @@ auto SelectMixerOne() -> MixerOneFunc
 auto SelectHrtfMixer() -> HrtfMixerFunc
 {
 #if HAVE_NEON
-    if((CPUCapFlags&CPU_CAP_NEON))
+    if(CPUCapFlags.test(CPUCap::NEON))
         return MixHrtf_NEON;
 #endif
 #if HAVE_SSE
-    if((CPUCapFlags&CPU_CAP_SSE))
+    if(CPUCapFlags.test(CPUCap::SSE))
         return MixHrtf_SSE;
 #endif
     return MixHrtf_C;
@@ -114,11 +114,11 @@ auto SelectHrtfMixer() -> HrtfMixerFunc
 auto SelectHrtfBlendMixer() -> HrtfMixerBlendFunc
 {
 #if HAVE_NEON
-    if((CPUCapFlags&CPU_CAP_NEON))
+    if(CPUCapFlags.test(CPUCap::NEON))
         return MixHrtfBlend_NEON;
 #endif
 #if HAVE_SSE
-    if((CPUCapFlags&CPU_CAP_SSE))
+    if(CPUCapFlags.test(CPUCap::SSE))
         return MixHrtfBlend_SSE;
 #endif
     return MixHrtfBlend_C;
@@ -150,18 +150,18 @@ void Voice::InitMixer(std::optional<std::string> const &resopt)
 
         auto resampler = std::string_view{*resopt};
 		
-        if (al::case_compare(resampler, "cubic"sv) == 0)
+        if(is_eq(al::case_compare(resampler, "cubic"sv)))
         {
             WARN("Resampler option \"{}\" is deprecated, using spline", *resopt);
             resampler = "spline"sv;
         }
-        else if(al::case_compare(resampler, "sinc4"sv) == 0
-            || al::case_compare(resampler, "sinc8"sv) == 0)
+        else if(is_eq(al::case_compare(resampler, "sinc4"sv))
+            or is_eq(al::case_compare(resampler, "sinc8"sv)))
         {
             WARN("Resampler option \"{}\" is deprecated, using gaussian", *resopt);
             resampler = "gaussian"sv;
         }
-        else if(al::case_compare(resampler, "bsinc"sv) == 0)
+        else if(is_eq(al::case_compare(resampler, "bsinc"sv)))
         {
             WARN("Resampler option \"{}\" is deprecated, using bsinc12", *resopt);
             resampler = "bsinc12"sv;
@@ -169,7 +169,7 @@ void Voice::InitMixer(std::optional<std::string> const &resopt)
 
         auto const iter = std::ranges::find_if(ResamplerList,
             [resampler](ResamplerEntry const &entry)
-        { return al::case_compare(resampler, entry.name) == 0; });
+        { return is_eq(al::case_compare(resampler, entry.name)); });
         if(iter == ResamplerList.end())
             ERR("Invalid resampler: {}", *resopt);
         else
@@ -1226,7 +1226,7 @@ void Voice::prepare(DeviceBase *device)
         -> std::pair<std::unique_ptr<DecoderBase>, unsigned>
     {
         using decoder_t = T::decoder_t;
-        return {std::make_unique<decoder_t>(), decoder_t::sInputPadding};
+        return {std::make_unique<decoder_t>(), static_cast<unsigned>(decoder_t::sInputPadding)};
     };
     if(mFmtChannels == FmtSuperStereo)
     {

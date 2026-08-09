@@ -27,6 +27,7 @@
 #include <atomic>
 #include <cinttypes>
 #include <cmath>
+#include <concepts>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -322,21 +323,19 @@ auto pwire_load() -> bool
         return false;
     }
 
-    static constexpr auto load_func = [](auto *&func, gsl::czstring const name) -> bool
+    static constexpr auto load_sym = []<typename T>(T *&func, gsl::czstring const name) -> bool
     {
-        using func_t = std::remove_reference_t<decltype(func)>;
-        auto const funcresult = GetSymbol(pwire_handle, name);
+        auto const funcresult = GetSymbolAddress<T>(pwire_handle, name);
         if(!funcresult)
         {
-            WARN("Failed to load function {}: {}", name, funcresult.error());
+            WARN("Failed to load symbol {}: {}", name, funcresult.error());
             return false;
         }
-        /* NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) */
-        func = reinterpret_cast<func_t>(funcresult.value());
+        func = funcresult.value();
         return true;
     };
     auto ok = true;
-#define LOAD_FUNC(f) ok &= load_func(p##f, #f);
+#define LOAD_FUNC(f) ok &= load_sym(p##f, #f);
     PWIRE_FUNCS(LOAD_FUNC)
     PWIRE_FUNCS2(LOAD_FUNC)
 #undef LOAD_FUNC
@@ -537,7 +536,7 @@ struct MainloopUniqueLock : std::unique_lock<ThreadMainloop> {
     auto wait() const -> void
     { pw_thread_loop_wait(mutex()->mLoop); }
 
-    template<typename Predicate>
+    template<std::predicate Predicate>
     auto wait(Predicate done_waiting) const -> void
     { while(!done_waiting()) wait(); }
 };

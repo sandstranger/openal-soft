@@ -201,7 +201,7 @@ auto APIENTRY DllMain(HINSTANCE module, DWORD reason, LPVOID /*reserved*/) -> BO
 
 namespace {
 
-#if defined(__linux__) && !defined(AL_LIBTYPE_STATIC) && HAS_ATTRIBUTE(gnu::alias)
+#if defined(__linux__) && !defined(AL_LIBTYPE_STATIC) && __has_cpp_attribute(gnu::alias)
 #define DefineAlcAlias(X) extern "C" DECL_HIDDEN [[gnu::alias(#X)]] decltype(X) X##_;
 #else
 #define DefineAlcAlias(X)
@@ -433,8 +433,7 @@ void alc_initconfig()
         std::string_view{ALSOFT_GIT_COMMIT_HASH}.empty() ? "unknown" : ALSOFT_GIT_COMMIT_HASH,
         std::string_view{ALSOFT_GIT_BRANCH}.empty() ? "unknown" : ALSOFT_GIT_BRANCH);
     {
-        auto names = std::array<std::string_view, BackendList.size()>{};
-        std::ranges::transform(BackendList, names.begin(), &BackendInfo::name);
+        auto const names = BackendList | std::views::transform(&BackendInfo::name);
         TRACE("{}", fmt::format("Supported backends: {}", fmt::join(names, ", ")));
     }
     ReadALConfig();

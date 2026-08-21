@@ -127,9 +127,9 @@ struct PshifterState final : EffectState {
 
     void deviceUpdate(const DeviceBase *device, const BufferStorage *buffer) override;
     void update(const ContextBase *context, const EffectSlotBase *slot, const EffectProps *props,
-        EffectTarget target) override;
+        EffectTarget target) noexcept NONBLOCKING override;
     void process(size_t samplesToDo, std::span<const FloatBufferLine> samplesIn,
-        std::span<FloatBufferLine> samplesOut) override;
+        std::span<FloatBufferLine> samplesOut) noexcept override;
 };
 
 void PshifterState::deviceUpdate(DeviceBase const *device, BufferStorage const*)
@@ -172,9 +172,9 @@ void PshifterState::deviceUpdate(DeviceBase const *device, BufferStorage const*)
 }
 
 void PshifterState::update(const ContextBase*, const EffectSlotBase *slot,
-    const EffectProps *props_, const EffectTarget target)
+    const EffectProps *props_, const EffectTarget target) noexcept NONBLOCKING
 {
-    auto &props = std::get<PshifterProps>(*props_);
+    auto &props = IGNORE_FUNCTION_EFFECTS(std::get<PshifterProps>(*props_));
     const auto tune = props.CoarseTune*100 + props.FineTune;
     const auto pitch = std::pow(2.0f, static_cast<float>(tune) / 1200.0f);
     mPitchShiftI = fastf2u(std::clamp(pitch, 0.5f, 2.0f)*MixerFracOne);
@@ -193,7 +193,7 @@ void PshifterState::update(const ContextBase*, const EffectSlotBase *slot,
 
     if(mUpsampler.has_value())
     {
-        auto &upsampler = mUpsampler.value();
+        auto &upsampler = *mUpsampler;
 
         auto const outgain = slot->Gain;
         for(auto const idx : std::views::iota(0_uz, mChans.size()))
@@ -207,6 +207,7 @@ void PshifterState::update(const ContextBase*, const EffectSlotBase *slot,
 
 void PshifterState::process(const size_t samplesToDo,
     const std::span<const FloatBufferLine> samplesIn, const std::span<FloatBufferLine> samplesOut)
+    noexcept NONBLOCKING
 {
     /* Pitch shifter engine based on the work of Stephan Bernsee.
      * http://blogs.zynaptiq.com/bernsee/pitch-shifting-using-the-ft/
@@ -215,7 +216,7 @@ void PshifterState::process(const size_t samplesToDo,
     /* Cycle offset per update expected of each frequency bin (bin 0 is none,
      * bin 1 is x1, bin 2 is x2, etc).
      */
-    static constexpr auto expected_cycles = std::numbers::pi_v<float>*2.0f / OversampleFactor;
+    constexpr auto expected_cycles = std::numbers::pi_v<float>*2.0f / OversampleFactor;
 
     auto const numInput = std::min(samplesIn.size(), NumLines);
     for(auto base = 0_uz;base < samplesToDo;)
@@ -362,8 +363,8 @@ void PshifterState::process(const size_t samplesToDo,
             }
             else
             {
-                static constexpr auto bin_limit = unsigned{
-                    ((StftHalfSize+1)<<MixerFracBits)-MixerFracHalf - 1};
+                constexpr auto bin_limit = unsigned{((StftHalfSize+1)<<MixerFracBits)-MixerFracHalf
+                    - 1};
                 auto const bin_count = size_t{std::min(StftHalfSize+1,
                     bin_limit/mPitchShiftI + 1)};
                 /* For the non-omnidirectional (W) channels, we only need the
@@ -417,9 +418,12 @@ void PshifterState::process(const size_t samplesToDo,
             mFft.transform_ordered(mFftBuffer.begin(), mFftBuffer.begin(), mFftWorkBuffer.begin(),
                 PFFFT_BACKWARD);
 
-            static constexpr auto scale = float{3.0f / OversampleFactor / StftSize};
             std::ranges::transform(mFftBuffer, gWindow, mFftBuffer.begin(),
-                [](const float a, const float w) noexcept { return w*a*scale; });
+                [](const float a, const float w) noexcept
+            {
+                constexpr auto scale = float{3.0f / OversampleFactor / StftSize};
+                return w*a*scale;
+            });
 
             auto outputAccum = std::span{chandata.mOutputAccum};
             const auto accumrange = outputAccum | std::views::drop(mPos);
@@ -439,7 +443,7 @@ void PshifterState::process(const size_t samplesToDo,
     /* Now, mix the processed sound data to the output. */
     if(mUpsampler.has_value())
     {
-        auto &upsampler = mUpsampler.value();
+        auto &upsampler = *mUpsampler;
         auto chandata = mChans.begin();
         for(const auto c : std::views::iota(0_uz, numInput))
         {

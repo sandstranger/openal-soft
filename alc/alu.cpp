@@ -114,10 +114,10 @@ auto ZScale = 1.0f;
 auto NfcScale = 1.0f;
 
 
-using HrtfDirectMixerFunc = void(*)(FloatBufferSpan LeftOut, FloatBufferSpan RightOut,
+using HrtfDirectMixerFunc = auto(*)(FloatBufferSpan LeftOut, FloatBufferSpan RightOut,
     std::span<FloatBufferLine const> InSamples, std::span<f32x2> AccumSamples,
     std::span<float, BufferLineSize> TempBuf, std::span<HrtfChannelState> ChanState,
-    std::size_t IrSize, std::size_t SamplesToDo);
+    std::size_t IrSize, std::size_t SamplesToDo) noexcept NONBLOCKING -> void;
 
 constinit auto MixDirectHrtf = HrtfDirectMixerFunc{MixDirectHrtf_C};
 
@@ -173,34 +173,34 @@ auto SelectResampler(Resampler const resampler, unsigned const increment) noexce
         return Resample_Point_C;
     case Resampler::Linear:
 #if HAVE_NEON
-        if(CPUCapFlags[CPUCap::NEON])
+        if(CPUCapFlags.test(CPUCap::NEON))
             return Resample_Linear_NEON;
 #endif
 #if HAVE_SSE4_1
-        if(CPUCapFlags[CPUCap::SSE4_1])
+        if(CPUCapFlags.test(CPUCap::SSE4_1))
             return Resample_Linear_SSE4;
 #endif
 #if HAVE_SSE2
-        if(CPUCapFlags[CPUCap::SSE2])
+        if(CPUCapFlags.test(CPUCap::SSE2))
             return Resample_Linear_SSE2;
 #endif
         return Resample_Linear_C;
     case Resampler::Spline:
     case Resampler::Gaussian:
 #if HAVE_NEON
-        if(CPUCapFlags[CPUCap::NEON])
+        if(CPUCapFlags.test(CPUCap::NEON))
             return Resample_Cubic_NEON;
 #endif
 #if HAVE_SSE4_1
-        if(CPUCapFlags[CPUCap::SSE4_1])
+        if(CPUCapFlags.test(CPUCap::SSE4_1))
             return Resample_Cubic_SSE4;
 #endif
 #if HAVE_SSE2
-        if(CPUCapFlags[CPUCap::SSE2])
+        if(CPUCapFlags.test(CPUCap::SSE2))
             return Resample_Cubic_SSE2;
 #endif
 #if HAVE_SSE
-        if(CPUCapFlags[CPUCap::SSE])
+        if(CPUCapFlags.test(CPUCap::SSE))
             return Resample_Cubic_SSE;
 #endif
         return Resample_Cubic_C;
@@ -210,11 +210,11 @@ auto SelectResampler(Resampler const resampler, unsigned const increment) noexce
         if(increment > MixerFracOne)
         {
 #if HAVE_NEON
-            if(CPUCapFlags[CPUCap::NEON])
+            if(CPUCapFlags.test(CPUCap::NEON))
                 return Resample_BSinc_NEON;
 #endif
 #if HAVE_SSE
-            if(CPUCapFlags[CPUCap::SSE])
+            if(CPUCapFlags.test(CPUCap::SSE))
                 return Resample_BSinc_SSE;
 #endif
             return Resample_BSinc_C;
@@ -224,11 +224,11 @@ auto SelectResampler(Resampler const resampler, unsigned const increment) noexce
     case Resampler::FastBSinc24:
     case Resampler::FastBSinc48:
 #if HAVE_NEON
-        if(CPUCapFlags[CPUCap::NEON])
+        if(CPUCapFlags.test(CPUCap::NEON))
             return Resample_FastBSinc_NEON;
 #endif
 #if HAVE_SSE
-        if(CPUCapFlags[CPUCap::SSE])
+        if(CPUCapFlags.test(CPUCap::SSE))
             return Resample_FastBSinc_SSE;
 #endif
         return Resample_FastBSinc_C;
@@ -318,7 +318,7 @@ void DeviceBase::Process(TsmePostProcess const &proc, std::size_t const SamplesT
     auto const ridx = RealOut.ChannelIndex[FrontRight];
 
     /* Encode to stereo-compatible 2-channel output. */
-    proc.mUhjEncoder->encode(std::span{RealOut.Buffer[lidx.c_val]}.first(SamplesToDo),
+    proc.mTsmeEncoder->encode(std::span{RealOut.Buffer[lidx.c_val]}.first(SamplesToDo),
         std::span{RealOut.Buffer[ridx.c_val]}.first(SamplesToDo),
         {{std::span{Dry.Buffer[0]}.first(SamplesToDo),
             std::span{Dry.Buffer[1]}.first(SamplesToDo),
@@ -505,7 +505,7 @@ constexpr auto GetAmbi2DLayout(AmbiLayout const layouttype) noexcept
 
 
 [[nodiscard]]
-auto CalcContextParams(ContextBase *const ctx) -> bool
+auto CalcContextParams(ContextBase *const ctx) noexcept NONBLOCKING -> bool
 {
     auto *const props = ctx->mParams.ContextUpdate.exchange(nullptr, std::memory_order_acq_rel);
     if(!props) return false;
@@ -556,7 +556,7 @@ auto CalcContextParams(ContextBase *const ctx) -> bool
 
 [[nodiscard]]
 auto CalcEffectSlotParams(EffectSlotBase *const slot, EffectSlotBase **const sorted_slots,
-    ContextBase *const context) ->bool
+    ContextBase *const context) noexcept NONBLOCKING -> bool
 {
     auto *const props = slot->Update.exchange(nullptr, std::memory_order_acq_rel);
     if(!props) return false;
@@ -596,7 +596,7 @@ auto CalcEffectSlotParams(EffectSlotBase *const slot, EffectSlotBase **const sor
 
     auto *const state = props->State.release();
     auto *const oldstate = slot->mEffectState.release();
-    slot->mEffectState.reset(state);
+    IGNORE_FUNCTION_EFFECTS(slot->mEffectState.reset(state));
 
     /* Only release the old state if it won't get deleted, since we can't be
      * deleting/freeing anything in the mixer.
@@ -618,7 +618,7 @@ auto CalcEffectSlotParams(EffectSlotBase *const slot, EffectSlotBase **const sor
              * cleaned up sometime later (not ideal, but better than blocking
              * or leaking).
              */
-            props->State.reset(oldstate);
+            IGNORE_FUNCTION_EFFECTS(props->State.reset(oldstate));
         }
     }
 
@@ -640,7 +640,7 @@ auto CalcEffectSlotParams(EffectSlotBase *const slot, EffectSlotBase **const sor
  * scales +/-30 degrees to +/-90 degrees, leaving > +90 and < -90 alone.
  */
 [[nodiscard]]
-auto ScaleAzimuthFront3(std::array<float, 3> pos) -> std::array<float, 3>
+auto ScaleAzimuthFront3(std::array<float, 3> pos) noexcept NONBLOCKING -> std::array<float, 3>
 {
     if(pos[2] < 0.0f)
     {
@@ -674,7 +674,7 @@ auto ScaleAzimuthFront3(std::array<float, 3> pos) -> std::array<float, 3>
 
 /* Scales the azimuth of the given vector by 1.5 (3/2) if it's in front. */
 [[nodiscard]]
-auto ScaleAzimuthFront3_2(std::array<float, 3> pos) -> std::array<float, 3>
+auto ScaleAzimuthFront3_2(std::array<float, 3> pos) noexcept NONBLOCKING -> std::array<float, 3>
 {
     if(pos[2] < 0.0f)
     {
@@ -796,12 +796,12 @@ const auto RotatorCoeffArray = RotatorCoeffs{};
  * coefficients, this fills in the coefficients for the higher orders up to and
  * including the given order. The matrix is in ACN layout.
  */
-void AmbiRotator(AmbiRotateMatrix &matrix, int const order)
+void AmbiRotator(AmbiRotateMatrix &matrix, int const order) noexcept NONBLOCKING
 {
     /* Don't do anything for < 2nd order. */
     if(order < 2) return;
 
-    static constexpr auto P = [](isize const i, isize const l, isize const a, isize const n,
+    constexpr auto P = [](isize const i, isize const l, isize const a, isize const n,
         usize const last_base, AmbiRotateMatrix const &R)
     {
         auto const ip2 = (i+2_z).reinterpret_as<usize>().c_val;
@@ -818,12 +818,12 @@ void AmbiRotator(AmbiRotateMatrix &matrix, int const order)
         return ri0*R[(last_base + lm1 + n.reinterpret_as<usize>()).c_val][x];
     };
 
-    static constexpr auto U = [](isize const l, isize const m, isize const n,
+    constexpr auto U = [P](isize const l, isize const m, isize const n,
         usize const last_base, AmbiRotateMatrix const &R)
     {
         return P(0, l, m, n, last_base, R);
     };
-    static constexpr auto V = [](isize const l, isize const m, isize const n,
+    constexpr auto V = [P](isize const l, isize const m, isize const n,
         usize const last_base, AmbiRotateMatrix const &R)
     {
         using namespace std::numbers;
@@ -839,7 +839,7 @@ void AmbiRotator(AmbiRotateMatrix &matrix, int const order)
         auto const p1 = P(-1, l, -m-1, n, last_base, R);
         return d ? p1*sqrt2_v<float> : (p0 + p1);
     };
-    static constexpr auto W = [](isize const l, isize const m, isize const n,
+    constexpr auto W = [P](isize const l, isize const m, isize const n,
         usize const last_base, AmbiRotateMatrix const &R)
     {
         Expects(m != 0);
@@ -912,7 +912,7 @@ void CalcAmbisonicPanning(Voice *const voice, float const xpos, float const ypos
     float const distance, float const spread, GainTriplet const &drygain,
     std::span<const GainTriplet, MaxSendCount> const wetgain,
     std::span<EffectSlotBase*const, MaxSendCount> const sendslots, ContextParams const &ctxparams,
-    DeviceBase *const device)
+    DeviceBase *const device) noexcept NONBLOCKING
 {
     auto const samplerate = gsl::narrow_cast<float>(device->mSampleRate);
 
@@ -1076,12 +1076,12 @@ void CalcAmbisonicPanning(Voice *const voice, float const xpos, float const ypos
 }
 
 [[nodiscard]]
-auto GetPanGainSelector(VoiceProps const &props)
+auto GetPanGainSelector(VoiceProps const &props) noexcept NONBLOCKING
 {
     auto const lgain = std::min(1.0f - props.Panning, 1.0f);
     auto const rgain = std::min(1.0f + props.Panning, 1.0f);
     auto const mingain = std::min(lgain, rgain);
-    return [lgain,rgain,mingain](Channel const chan) noexcept -> float
+    return [lgain,rgain,mingain](Channel const chan) noexcept NONBLOCKING -> float
     {
         switch(chan)
         {
@@ -1118,6 +1118,7 @@ auto GetPanGainSelector(VoiceProps const &props)
  */
 void MergePannedMono(Voice *const voice,
     std::span<EffectSlotBase*const, MaxSendCount> const sendslots, DeviceBase *const device)
+    noexcept NONBLOCKING
 {
     auto const drytarget0 = std::span{voice->mChans[0].mDryParams.Gains.Target};
     auto const drytarget1 = std::span{voice->mChans[1].mDryParams.Gains.Target};
@@ -1142,6 +1143,7 @@ void CalcDirectPanning(Voice *const voice, DirectMode const directmode,
     std::span<ChanPosMap const> const chans, GainTriplet const &drygain,
     std::span<GainTriplet const, MaxSendCount> const wetgain,
     std::span<EffectSlotBase*const, MaxSendCount> const sendslots, DeviceBase *const device)
+    noexcept NONBLOCKING
 {
     auto const &props = voice->mProps;
     auto ChannelPanGain = GetPanGainSelector(props);
@@ -1197,6 +1199,7 @@ void CalcHrtfPanning(Voice *const voice, float const xpos, float const ypos, flo
     float const distance, float const spread, std::span<ChanPosMap const> const chans,
     GainTriplet const &drygain, std::span<GainTriplet const, MaxSendCount> const wetgain,
     std::span<EffectSlotBase*const, MaxSendCount> const sendslots, DeviceBase *const device)
+    noexcept NONBLOCKING
 {
     auto const &props = voice->mProps;
     auto ChannelPanGain = GetPanGainSelector(props);
@@ -1312,6 +1315,7 @@ void CalcNormalPanning(Voice *const voice, float const xpos, float const ypos, f
     float const distance, float const spread, std::span<ChanPosMap const> const chans,
     GainTriplet const &drygain, std::span<GainTriplet const, MaxSendCount> const wetgain,
     std::span<EffectSlotBase*const, MaxSendCount> const sendslots, DeviceBase *const device)
+    noexcept NONBLOCKING
 {
     auto const &props = voice->mProps;
     auto ChannelPanGain = GetPanGainSelector(props);
@@ -1464,53 +1468,53 @@ void CalcNormalPanning(Voice *const voice, float const xpos, float const ypos, f
         MergePannedMono(voice, sendslots, device);
 }
 
+constexpr auto MonoMap = std::array{
+    ChanPosMap{FrontCenter, std::array{0.0f, 0.0f, -1.0f}}
+};
+constexpr auto RearMap = std::array{
+    ChanPosMap{BackLeft,  std::array{-sin30, 0.0f, cos30}},
+    ChanPosMap{BackRight, std::array{ sin30, 0.0f, cos30}},
+};
+constexpr auto QuadMap = std::array{
+    ChanPosMap{FrontLeft,  std::array{-sin45, 0.0f, -cos45}},
+    ChanPosMap{FrontRight, std::array{ sin45, 0.0f, -cos45}},
+    ChanPosMap{BackLeft,   std::array{-sin45, 0.0f,  cos45}},
+    ChanPosMap{BackRight,  std::array{ sin45, 0.0f,  cos45}},
+};
+constexpr auto X51Map = std::array{
+    ChanPosMap{FrontLeft,   std::array{-sin30, 0.0f, -cos30}},
+    ChanPosMap{FrontRight,  std::array{ sin30, 0.0f, -cos30}},
+    ChanPosMap{FrontCenter, std::array{  0.0f, 0.0f, -1.0f}},
+    ChanPosMap{LFE, {}},
+    ChanPosMap{SideLeft,    std::array{-sin110, 0.0f, -cos110}},
+    ChanPosMap{SideRight,   std::array{ sin110, 0.0f, -cos110}},
+};
+constexpr auto X61Map = std::array{
+    ChanPosMap{FrontLeft,   std::array{-sin30, 0.0f, -cos30}},
+    ChanPosMap{FrontRight,  std::array{ sin30, 0.0f, -cos30}},
+    ChanPosMap{FrontCenter, std::array{  0.0f, 0.0f, -1.0f}},
+    ChanPosMap{LFE, {}},
+    ChanPosMap{BackCenter,  std::array{ 0.0f, 0.0f, 1.0f}},
+    ChanPosMap{SideLeft,    std::array{-1.0f, 0.0f, 0.0f}},
+    ChanPosMap{SideRight,   std::array{ 1.0f, 0.0f, 0.0f}},
+};
+constexpr auto X71Map = std::array{
+    ChanPosMap{FrontLeft,   std::array{-sin30, 0.0f, -cos30}},
+    ChanPosMap{FrontRight,  std::array{ sin30, 0.0f, -cos30}},
+    ChanPosMap{FrontCenter, std::array{  0.0f, 0.0f, -1.0f}},
+    ChanPosMap{LFE, {}},
+    ChanPosMap{BackLeft,    std::array{-sin30, 0.0f, cos30}},
+    ChanPosMap{BackRight,   std::array{ sin30, 0.0f, cos30}},
+    ChanPosMap{SideLeft,    std::array{ -1.0f, 0.0f, 0.0f}},
+    ChanPosMap{SideRight,   std::array{  1.0f, 0.0f, 0.0f}},
+};
+
 void CalcPanningAndFilters(Voice *const voice, float const xpos, float const ypos,
     float const zpos, float const distance, float const spread, GainTriplet const &drygain,
     std::span<GainTriplet const, MaxSendCount> const wetgain,
     std::span<EffectSlotBase*const, MaxSendCount> const sendslots, ContextParams const &ctxparams,
-    DeviceBase *const device)
+    DeviceBase *const device) noexcept NONBLOCKING
 {
-    static constexpr auto MonoMap = std::array{
-        ChanPosMap{FrontCenter, std::array{0.0f, 0.0f, -1.0f}}
-    };
-    static constexpr auto RearMap = std::array{
-        ChanPosMap{BackLeft,  std::array{-sin30, 0.0f, cos30}},
-        ChanPosMap{BackRight, std::array{ sin30, 0.0f, cos30}},
-    };
-    static constexpr auto QuadMap = std::array{
-        ChanPosMap{FrontLeft,  std::array{-sin45, 0.0f, -cos45}},
-        ChanPosMap{FrontRight, std::array{ sin45, 0.0f, -cos45}},
-        ChanPosMap{BackLeft,   std::array{-sin45, 0.0f,  cos45}},
-        ChanPosMap{BackRight,  std::array{ sin45, 0.0f,  cos45}},
-    };
-    static constexpr auto X51Map = std::array{
-        ChanPosMap{FrontLeft,   std::array{-sin30, 0.0f, -cos30}},
-        ChanPosMap{FrontRight,  std::array{ sin30, 0.0f, -cos30}},
-        ChanPosMap{FrontCenter, std::array{  0.0f, 0.0f, -1.0f}},
-        ChanPosMap{LFE, {}},
-        ChanPosMap{SideLeft,    std::array{-sin110, 0.0f, -cos110}},
-        ChanPosMap{SideRight,   std::array{ sin110, 0.0f, -cos110}},
-    };
-    static constexpr auto X61Map = std::array{
-        ChanPosMap{FrontLeft,   std::array{-sin30, 0.0f, -cos30}},
-        ChanPosMap{FrontRight,  std::array{ sin30, 0.0f, -cos30}},
-        ChanPosMap{FrontCenter, std::array{  0.0f, 0.0f, -1.0f}},
-        ChanPosMap{LFE, {}},
-        ChanPosMap{BackCenter,  std::array{ 0.0f, 0.0f, 1.0f}},
-        ChanPosMap{SideLeft,    std::array{-1.0f, 0.0f, 0.0f}},
-        ChanPosMap{SideRight,   std::array{ 1.0f, 0.0f, 0.0f}},
-    };
-    static constexpr auto X71Map = std::array{
-        ChanPosMap{FrontLeft,   std::array{-sin30, 0.0f, -cos30}},
-        ChanPosMap{FrontRight,  std::array{ sin30, 0.0f, -cos30}},
-        ChanPosMap{FrontCenter, std::array{  0.0f, 0.0f, -1.0f}},
-        ChanPosMap{LFE, {}},
-        ChanPosMap{BackLeft,    std::array{-sin30, 0.0f, cos30}},
-        ChanPosMap{BackRight,   std::array{ sin30, 0.0f, cos30}},
-        ChanPosMap{SideLeft,    std::array{ -1.0f, 0.0f, 0.0f}},
-        ChanPosMap{SideRight,   std::array{  1.0f, 0.0f, 0.0f}},
-    };
-
     auto StereoMap = std::array{
         ChanPosMap{FrontLeft,   std::array{-sin30, 0.0f, -cos30}},
         ChanPosMap{FrontRight,  std::array{ sin30, 0.0f, -cos30}},
@@ -1652,7 +1656,8 @@ void CalcPanningAndFilters(Voice *const voice, float const xpos, float const ypo
     }
 }
 
-void CalcNonAttnVoiceParams(Voice *const voice, ContextBase const *const context)
+void CalcNonAttnVoiceParams(Voice *const voice, ContextBase const *const context) noexcept
+    NONBLOCKING
 {
     auto const &props = voice->mProps;
     auto const device = al::get_not_null(context->mDevice);
@@ -1704,7 +1709,7 @@ void CalcNonAttnVoiceParams(Voice *const voice, ContextBase const *const context
         context->mParams, device);
 }
 
-void CalcAttnVoiceParams(Voice *const voice, ContextBase const *const context)
+void CalcAttnVoiceParams(Voice *const voice, ContextBase const *const context) noexcept NONBLOCKING
 {
     auto const &props = voice->mProps;
     auto const device = al::get_not_null(context->mDevice);
@@ -1850,7 +1855,7 @@ void CalcAttnVoiceParams(Voice *const voice, ContextBase const *const context)
     auto wetconehf = 1.0f;
     if(directional && props.InnerAngle < 360.0f)
     {
-        static constexpr auto Rad2Deg = gsl::narrow_cast<float>(180.0 / std::numbers::pi);
+        constexpr auto Rad2Deg = gsl::narrow_cast<float>(180.0 / std::numbers::pi);
         auto const angle = Rad2Deg*2.0f * std::acos(-direction.dot_product(tosource)) * ConeScale;
 
         auto conegain = 1.0f;
@@ -2004,7 +2009,8 @@ void CalcAttnVoiceParams(Voice *const voice, ContextBase const *const context)
         distance, spread, drygain, wetgain, sendslots, context->mParams, device);
 }
 
-void CalcVoiceParams(Voice *const voice, ContextBase *const context, bool const force)
+void CalcVoiceParams(Voice *const voice, ContextBase *const context, bool const force) noexcept
+    NONBLOCKING
 {
     if(auto *const props = voice->mUpdate.exchange(nullptr, std::memory_order_acq_rel))
     {
@@ -2026,7 +2032,7 @@ void CalcVoiceParams(Voice *const voice, ContextBase *const context, bool const 
 
 
 void SendSourceStateEvent(ContextBase const *const context, unsigned const id,
-    VChangeState const state)
+    VChangeState const state) noexcept NONBLOCKING
 {
     auto *const ring = context->mAsyncEvents.get();
     auto const evt_vec = ring->getWriteVector();
@@ -2048,7 +2054,7 @@ void SendSourceStateEvent(ContextBase const *const context, unsigned const id,
     ring->writeAdvance(1);
 }
 
-void ProcessVoiceChanges(ContextBase *const ctx)
+void ProcessVoiceChanges(ContextBase *const ctx) noexcept NONBLOCKING
 {
     auto *cur = ctx->mCurrentVoiceChange.load(std::memory_order_acquire);
     auto *next = cur->mNext.load(std::memory_order_acquire);
@@ -2145,7 +2151,8 @@ void ProcessVoiceChanges(ContextBase *const ctx)
 }
 
 void ProcessParamUpdates(ContextBase *const ctx, std::span<EffectSlotBase*const> const slots,
-    std::span<EffectSlotBase*> const sorted_slots, std::span<Voice*const> const voices)
+    std::span<EffectSlotBase*> const sorted_slots, std::span<Voice*const> const voices) noexcept
+    NONBLOCKING
 {
     ProcessVoiceChanges(ctx);
 
@@ -2167,14 +2174,15 @@ void ProcessParamUpdates(ContextBase *const ctx, std::span<EffectSlotBase*const>
     IncrementRef(ctx->mUpdateCount);
 }
 
-void ProcessContexts(DeviceBase const *const device, unsigned const SamplesToDo)
+void ProcessContexts(DeviceBase const *const device, unsigned const SamplesToDo) noexcept
+    NONBLOCKING
 {
     ASSUME(SamplesToDo > 0);
 
     auto const curtime = device->getClockTime();
 
     auto const contexts = std::span{*device->mContexts.load(std::memory_order_acquire)};
-    std::ranges::for_each(contexts, [SamplesToDo,curtime](ContextBase *ctx)
+    std::ranges::for_each(contexts, [SamplesToDo,curtime](ContextBase *ctx) noexcept NONBLOCKING
     {
         auto const auxslotspan = std::span{*ctx->mActiveAuxSlots.load(std::memory_order_acquire)};
         auto const auxslots = auxslotspan.first(auxslotspan.size()>>1);
@@ -2209,7 +2217,7 @@ void ProcessContexts(DeviceBase const *const device, unsigned const SamplesToDo)
                 /* First, copy the slots to the sorted list and partition them,
                  * so that all slots without a target slot go to the end.
                  */
-                static constexpr auto has_target = [](EffectSlotBase const *const slot) noexcept
+                constexpr auto has_target = [](EffectSlotBase const *const slot) noexcept
                 { return slot->Target != nullptr; };
                 auto split_point = std::partition_copy(auxslots.rbegin(), auxslots.rend(),
                     sorted_slots.begin(), sorted_slots.rbegin(), has_target).first;
@@ -2252,14 +2260,21 @@ void ProcessContexts(DeviceBase const *const device, unsigned const SamplesToDo)
         if(auto const *const ring = ctx->mAsyncEvents.get(); ring->readSpace() > 0)
         {
             ctx->mEventsPending.store(1, std::memory_order_release);
-            al::atomic_notify_all(ctx->mEventsPending);
+            /* TODO: Don't know what to do here. atomic::notify_all is
+             * apparently not nonblocking, but how else can we alert sleeping
+             * threads that events happened that need handling? All it needs to
+             * do is tell the OS that any threads waiting on this can wake up
+             * when they're able, not that they should wake up immediately and
+             * put this thread to sleep or something.
+             */
+            IGNORE_FUNCTION_EFFECTS( al::atomic_notify_all(ctx->mEventsPending); )
         }
     });
 }
 
 
 void ApplyDistanceComp(std::span<FloatBufferLine> const Samples, std::size_t const SamplesToDo,
-    std::span<DistanceComp::ChanData const, MaxOutputChannels> const chandata)
+    std::span<DistanceComp::ChanData const, MaxOutputChannels> const chandata) noexcept NONBLOCKING
 {
     ASSUME(SamplesToDo > 0);
 
@@ -2292,9 +2307,9 @@ void ApplyDistanceComp(std::span<FloatBufferLine> const Samples, std::size_t con
 }
 
 void ApplyDither(std::span<FloatBufferLine> const Samples, unsigned *const dither_seed,
-    float const quant_scale, std::size_t const SamplesToDo)
+    float const quant_scale, std::size_t const SamplesToDo) noexcept NONBLOCKING
 {
-    static constexpr auto invRNGRange = 1.0 / std::numeric_limits<unsigned>::max();
+    constexpr auto invRNGRange = 1.0 / std::numeric_limits<unsigned>::max();
     ASSUME(SamplesToDo > 0);
 
     /* Dithering. Generate whitenoise (uniform distribution of random values
@@ -2346,7 +2361,8 @@ template<> [[nodiscard]] auto SampleConv(float const val) noexcept -> u8
 
 template<typename T>
 void Write(std::span<FloatBufferLine const> const InBuffer, void *const OutBuffer,
-    std::size_t const Offset, std::size_t const SamplesToDo, std::size_t const FrameStep)
+    std::size_t const Offset, std::size_t const SamplesToDo, std::size_t const FrameStep) noexcept
+    NONBLOCKING
 {
     ASSUME(FrameStep > 0);
     ASSUME(SamplesToDo > 0);
@@ -2377,7 +2393,7 @@ void Write(std::span<FloatBufferLine const> const InBuffer, void *const OutBuffe
 
 template<typename T>
 void Write(std::span<FloatBufferLine const> const InBuffer, std::span<void*const> const OutBuffers,
-    std::size_t const Offset, std::size_t const SamplesToDo)
+    std::size_t const Offset, std::size_t const SamplesToDo) noexcept NONBLOCKING
 {
     ASSUME(SamplesToDo > 0);
 
@@ -2385,14 +2401,15 @@ void Write(std::span<FloatBufferLine const> const InBuffer, std::span<void*const
         [Offset,SamplesToDo](void *const dstbuf, FloatConstBufferSpan const srcbuf)
     {
         auto const dst = std::span{static_cast<T*>(dstbuf), Offset+SamplesToDo}.subspan(Offset);
-        std::ranges::transform(srcbuf | std::views::take(SamplesToDo), dst.begin(), SampleConv<T>);
+        std::ranges::transform(srcbuf | std::views::take(SamplesToDo), dst.begin(),
+            [](float const s) noexcept { return SampleConv<T>(s); });
         return true;
     });
 }
 
 } // namespace
 
-auto DeviceBase::renderSamples(unsigned const numSamples) -> unsigned
+auto DeviceBase::renderSamples(unsigned const numSamples) noexcept NONBLOCKING -> unsigned
 {
     auto const samplesToDo = std::min(numSamples, unsigned{BufferLineSize});
 
@@ -2419,7 +2436,11 @@ auto DeviceBase::renderSamples(unsigned const numSamples) -> unsigned
     /* Apply any needed post-process for finalizing the Dry mix to the RealOut
      * (Ambisonic decode, UHJ encode, etc.).
      */
-    std::visit([this,samplesToDo](auto &arg) { this->Process(arg, samplesToDo); }, mPostProcess);
+    {
+        auto const do_proc = [this,samplesToDo](auto &arg) noexcept NONBLOCKING
+        { this->Process(arg, samplesToDo); };
+        IGNORE_FUNCTION_EFFECTS( visit(do_proc, mPostProcess); )
+    }
 
     /* Apply compression, limiting sample amplitude if needed or desired. */
     if(Limiter) Limiter->process(samplesToDo, RealOut.Buffer);
@@ -2438,6 +2459,7 @@ auto DeviceBase::renderSamples(unsigned const numSamples) -> unsigned
 }
 
 void DeviceBase::renderSamples(std::span<void*const> const outBuffers, unsigned const numSamples)
+    noexcept NONBLOCKING
 {
     auto mixer_mode = FPUCtl{};
     auto total = 0u;
@@ -2464,7 +2486,7 @@ void DeviceBase::renderSamples(std::span<void*const> const outBuffers, unsigned 
 }
 
 void DeviceBase::renderSamples(void *const outBuffer, unsigned const numSamples,
-    std::size_t const frameStep)
+    std::size_t const frameStep) noexcept NONBLOCKING
 {
     auto mixer_mode = FPUCtl{};
     auto total = 0u;

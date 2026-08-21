@@ -1482,16 +1482,6 @@ auto make_spa_info(DeviceBase *const device, bool const is51rear, use_f32p_e con
 }
 
 class PipeWirePlayback final : public BackendBase {
-    void stateChangedCallback(pw_stream_state old, pw_stream_state state, gsl::czstring error) const noexcept;
-    void ioChangedCallback(uint32_t id, void *area, uint32_t size) noexcept;
-    void outputCallback() noexcept;
-
-    void open(std::string_view name) override;
-    auto reset() -> bool override;
-    void start() override;
-    void stop() override;
-    auto getClockLatency() -> ClockLatency override;
-
     u64 mTargetId{PwIdAny};
     nanoseconds mTimeBase{0};
     ThreadMainloop mLoop;
@@ -1502,15 +1492,26 @@ class PipeWirePlayback final : public BackendBase {
     spa_io_rate_match *mRateMatch{};
     std::vector<void*> mChannelPtrs;
 
+    auto stateChangedCallback(pw_stream_state old, pw_stream_state state, gsl::czstring error)
+        const noexcept -> void;
+    auto ioChangedCallback(uint32_t id, void *area, uint32_t size) noexcept -> void;
+    auto outputCallback() noexcept NONBLOCKING -> void;
+
 public:
     explicit PipeWirePlayback(gsl::not_null<DeviceBase*> const device) noexcept
         : BackendBase{device}
     { }
-    ~PipeWirePlayback() final
+    ~PipeWirePlayback() override
     {
         /* Stop the mainloop so the stream can be properly destroyed. */
         if(mLoop) mLoop.stop();
     }
+
+    auto open(std::string_view name) -> void override;
+    auto reset() -> bool override;
+    auto start() -> void override;
+    auto stop() -> void override;
+    auto getClockLatency() -> ClockLatency override;
 };
 
 
@@ -1532,9 +1533,9 @@ void PipeWirePlayback::ioChangedCallback(uint32_t const id, void *const area, ui
     }
 }
 
-void PipeWirePlayback::outputCallback() noexcept
+void PipeWirePlayback::outputCallback() noexcept NONBLOCKING
 {
-    auto *const pw_buf = pw_stream_dequeue_buffer(mStream.get());
+    auto *const pw_buf = IGNORE_FUNCTION_EFFECTS( pw_stream_dequeue_buffer(mStream.get()); )
     if(!pw_buf) [[unlikely]] return;
 
     auto const datas = std::span{pw_buf->buffer->datas,
@@ -1573,7 +1574,7 @@ void PipeWirePlayback::outputCallback() noexcept
     mDevice->renderSamples(mChannelPtrs, length);
 
     pw_buf->size = length;
-    pw_stream_queue_buffer(mStream.get(), pw_buf);
+    IGNORE_FUNCTION_EFFECTS( pw_stream_queue_buffer(mStream.get(), pw_buf); )
 }
 
 
@@ -1763,7 +1764,7 @@ auto PipeWirePlayback::reset() -> bool
         ret.io_changed = [](void *const data, uint32_t const id, void *const area,
             uint32_t const size) noexcept -> void
         { static_cast<PipeWirePlayback*>(data)->ioChangedCallback(id, area, size); };
-        ret.process = [](void *const data) noexcept -> void
+        ret.process = [](void *const data) noexcept NONBLOCKING -> void
         { static_cast<PipeWirePlayback*>(data)->outputCallback(); };
         return ret;
     });
@@ -1982,15 +1983,6 @@ auto PipeWirePlayback::getClockLatency() -> ClockLatency
 
 
 class PipeWireCapture final : public BackendBase {
-    void stateChangedCallback(pw_stream_state old, pw_stream_state state, gsl::czstring error) const noexcept;
-    void inputCallback() const noexcept;
-
-    void open(std::string_view name) override;
-    void start() override;
-    void stop() override;
-    void captureSamples(std::span<std::byte> outbuffer) override;
-    auto availableSamples() -> std::size_t override;
-
     u64 mTargetId{PwIdAny};
     ThreadMainloop mLoop;
     PwContextPtr mContext;
@@ -2000,11 +1992,21 @@ class PipeWireCapture final : public BackendBase {
 
     RingBufferPtr<std::byte> mRing;
 
+    auto stateChangedCallback(pw_stream_state old, pw_stream_state state, gsl::czstring error)
+        const noexcept -> void;
+    auto inputCallback() const noexcept -> void;
+
 public:
     explicit PipeWireCapture(gsl::not_null<DeviceBase*> const device) noexcept
         : BackendBase{device}
     { }
-    ~PipeWireCapture() final { if(mLoop) mLoop.stop(); }
+    ~PipeWireCapture() override { if(mLoop) mLoop.stop(); }
+
+    auto open(std::string_view name) -> void override;
+    auto start() -> void override;
+    auto stop() -> void override;
+    auto captureSamples(std::span<std::byte> outbuffer) -> void override;
+    auto availableSamples() -> std::size_t override;
 };
 
 

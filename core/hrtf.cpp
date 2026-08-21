@@ -93,6 +93,7 @@ auto EnumeratedHrtfs = std::vector<HrtfEntry>{};
  * for seeking. With C++23, we may be able to use std::spanstream instead.
  */
 class databuf final : public std::streambuf {
+protected:
     auto underflow() -> int_type final { return traits_type::eof(); }
 
     auto seekoff(off_type const offset, std::ios_base::seekdir const whence,
@@ -189,7 +190,8 @@ auto CalcAzIndex(unsigned azcount, float az) -> IdxBlend
  * and azimuth in radians. The coefficients are normalized.
  */
 void HrtfStore::getCoeffs(float const elevation, float const azimuth, float const distance,
-    float const spread, HrirSpan const coeffs, std::span<unsigned, 2> const delays) const
+    float const spread, HrirSpan const coeffs, std::span<unsigned, 2> const delays) const noexcept
+    NONBLOCKING
 {
     auto const dirfact = 1.0f - (std::numbers::inv_pi_v<float>/2.0f * spread);
 

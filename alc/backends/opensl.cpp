@@ -42,8 +42,8 @@
 #include "althrd_setname.h"
 #include "core/device.h"
 #include "core/helpers.h"
+#include "dlopennote.h"
 #include "dynload.h"
-#include "gsl/gsl"
 #include "opthelpers.h"
 #include "ringbuffer.h"
 
@@ -52,9 +52,13 @@
 #include <SLES/OpenSLES_AndroidConfiguration.h>
 
 #if HAVE_CXXMODULES
+import gsl;
 import logging;
+import zstring_view;
 #else
+#include "alformatzsv.hpp"
 #include "core/logging.h"
+#include "gsl/gsl"
 #endif
 
 
@@ -72,10 +76,10 @@ using namespace std::string_view_literals;
     MAGIC(SL_IID_PLAY);                     \
     MAGIC(SL_IID_RECORD);
 
-void *sles_handle;
-#define MAKE_SYMBOL(f) decltype(f) * p##f
-SLES_SYMBOLS(MAKE_SYMBOL)
-#undef MAKE_SYMBOL
+auto sles_handle = LibHandle{};
+#define MAKE_FUNC(f) decltype(f)* p##f{}
+SLES_SYMBOLS(MAKE_FUNC)
+#undef MAKE_FUNC
 
 #ifndef IN_IDE_PARSER
 #define slCreateEngine (*pslCreateEngine)
@@ -933,7 +937,7 @@ auto OSLBackendFactory::init() -> bool
 #if HAVE_DYNLOAD
     if(!sles_handle)
     {
-        auto *const sles_lib = gsl::czstring{SLES_LIB};
+        auto constexpr sles_lib = al::zstring_view{SLES_LIB};
         if(auto const libresult = LoadLib(sles_lib))
             sles_handle = libresult.value();
         else
@@ -942,16 +946,16 @@ auto OSLBackendFactory::init() -> bool
             return false;
         }
 
-        static constexpr auto load_sym = []<typename T>(T *&func, gsl::czstring const name) -> bool
+        static constexpr auto load_sym = []<typename T>(T *&func, al::zstring_view const name)
+            -> bool
         {
-            auto const funcresult = GetSymbolAddress<T>(sles_handle, name);
-            if(!funcresult)
-            {
-                WARN("Failed to load symbol {}: {}", name, funcresult.error());
-                return false;
-            }
-            func = funcresult.value();
-            return true;
+            return GetSymbolAddress<T>(sles_handle, name)
+                .transform_error([name](std::string_view const err) {
+                    WARN("Failed to load symbol {}: {}", name, err);
+                    return false;
+                })
+                .transform([&func](T *addr) { func = addr; })
+                .has_value();
         };
         auto ok = true;
 #define LOAD_FUNC(f) ok &= load_sym(p##f, #f)

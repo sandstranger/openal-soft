@@ -46,7 +46,6 @@
 #include "core/device.h"
 #include "core/helpers.h"
 #include "dynload.h"
-#include "gsl/gsl"
 #include "ringbuffer.h"
 #include "strutils.hpp"
 
@@ -84,15 +83,19 @@ DEFINE_GUID(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT, 0x00000003, 0x0000, 0x0010, 0x80, 0
 #endif
 
 #if HAVE_CXXMODULES
+import gsl;
 import logging;
+import zstring_view;
 #else
+#include "alformatzsv.hpp"
 #include "core/logging.h"
+#include "gsl/gsl"
 #endif
 
 namespace {
 
 #if HAVE_DYNLOAD
-void *ds_handle;
+auto ds_handle = LibHandle{};
 HRESULT (WINAPI *pDirectSoundCreate)(const GUID *pcGuidDevice, IDirectSound **ppDS, IUnknown *pUnkOuter);
 HRESULT (WINAPI *pDirectSoundEnumerateW)(LPDSENUMCALLBACKW pDSEnumCallback, void *pContext);
 HRESULT (WINAPI *pDirectSoundCaptureCreate)(const GUID *pcGuidDevice, IDirectSoundCapture **ppDSC, IUnknown *pUnkOuter);
@@ -748,24 +751,25 @@ auto DSoundBackendFactory::init() -> bool
 #if HAVE_DYNLOAD
     if(!ds_handle)
     {
-        if(auto libresult = LoadLib("dsound.dll"))
+        auto constexpr dsound_lib = al::zstring_view{"dsound.dll"};
+        if(auto libresult = LoadLib(dsound_lib); libresult.has_value())
             ds_handle = libresult.value();
         else
         {
-            WARN("Failed to load dsound.dll: {}", libresult.error());
+            WARN("Failed to load {}: {}", dsound_lib, libresult.error());
             return false;
         }
 
-        static constexpr auto load_sym = []<typename T>(T *&func, gsl::czstring const name) -> bool
+        static constexpr auto load_sym = []<typename T>(T *&func, al::zstring_view const name)
+            -> bool
         {
-            auto const funcresult = GetSymbolAddress<T>(ds_handle, name);
-            if(!funcresult)
-            {
-                WARN("Failed to load symbol {}: {}", name, funcresult.error());
-                return false;
-            }
-            func = funcresult.value();
-            return true;
+            return GetSymbolAddress<T>(ds_handle, name)
+                .transform_error([name](std::string_view const err) {
+                    WARN("Failed to load symbol {}: {}", name, err);
+                    return false;
+                })
+                .transform([&func](T *addr) { func = addr; })
+                .has_value();
         };
         auto ok = true;
 #define LOAD_FUNC(f) ok &= load_sym(p##f, #f)

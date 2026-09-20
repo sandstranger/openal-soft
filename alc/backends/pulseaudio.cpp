@@ -45,6 +45,7 @@
 #include "base.h"
 #include "core/devformat.h"
 #include "core/device.h"
+#include "dlopennote.h"
 #include "dynload.h"
 #include "opthelpers.h"
 #include "strutils.hpp"
@@ -54,7 +55,9 @@
 #if HAVE_CXXMODULES
 import gsl;
 import logging;
+import zstring_view;
 #else
+#include "alformatzsv.hpp"
 #include "core/logging.h"
 #include "gsl/gsl"
 #endif
@@ -137,8 +140,8 @@ using cvoidp = const void*;
     MAGIC(pa_xmalloc);                                                        \
     MAGIC(pa_xfree);
 
-void *pulse_handle;
-#define MAKE_FUNC(x) decltype(x) * p##x
+auto pulse_handle = LibHandle{};
+#define MAKE_FUNC(f) decltype(f)* p##f{}
 PULSE_FUNCS(MAKE_FUNC)
 #undef MAKE_FUNC
 
@@ -1465,7 +1468,7 @@ auto PulseBackendFactory::init() -> bool
 #if HAVE_DYNLOAD
     if(!pulse_handle)
     {
-        auto *const pulse_lib = gsl::czstring{PULSE_LIB};
+        auto constexpr pulse_lib = al::zstring_view{PULSE_LIB};
         if(auto const libresult = LoadLib(pulse_lib))
             pulse_handle = libresult.value();
         else
@@ -1474,16 +1477,16 @@ auto PulseBackendFactory::init() -> bool
             return false;
         }
 
-        static constexpr auto load_sym = []<typename T>(T *&func, gsl::czstring const name) -> bool
+        static constexpr auto load_sym = []<typename T>(T *&func, al::zstring_view const name)
+            -> bool
         {
-            auto const funcresult = GetSymbolAddress<T>(pulse_handle, name);
-            if(!funcresult)
-            {
-                WARN("Failed to load symbol {}: {}", name, funcresult.error());
-                return false;
-            }
-            func = funcresult.value();
-            return true;
+            return GetSymbolAddress<T>(pulse_handle, name)
+                .transform_error([name](std::string_view const err) {
+                    WARN("Failed to load symbol {}: {}", name, err);
+                    return false;
+                })
+                .transform([&func](T *addr) { func = addr; })
+                .has_value();
         };
         auto ok = true;
 #define LOAD_FUNC(f) ok &= load_sym(p##f, #f)

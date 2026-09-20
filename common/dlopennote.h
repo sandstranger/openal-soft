@@ -44,11 +44,9 @@ inline constexpr auto Type = 0x407C0C0Au;
 
 template<std::size_t json_len>
 struct [[gnu::aligned(4)]] Structure {
-    struct {
-        std::uint32_t n_namesz{sizeof(Structure::name)};
-        std::uint32_t n_descsz{sizeof(Structure::dlopen_json)};
-        std::uint32_t n_type{Type};
-    } nhdr;
+    std::uint32_t n_namesz{sizeof(name)};
+    std::uint32_t n_descsz{sizeof(dlopen_json)};
+    std::uint32_t n_type{Type};
     std::array<char, 4> name{Vendor};
     std::array<char, json_len> dlopen_json;
 
@@ -67,14 +65,11 @@ namespace detail_ {
      * constexpr context, despite all calls being constexpr, and no type trait
      * supports getting the size of both C-style array and std::array types.
      */
-    template<typename T> [[nodiscard]] consteval
-    auto get_size() noexcept -> std::size_t
-    {
-        if constexpr(std::is_bounded_array_v<std::remove_reference_t<T>>)
-            return std::extent_v<std::remove_reference_t<T>>;
-        else
-            return std::tuple_size_v<std::remove_reference_t<T>>;
-    }
+    template<typename T>
+    inline auto constexpr array_size_v = std::tuple_size_v<std::remove_reference_t<T>>;
+
+    template<typename T> requires(std::is_bounded_array_v<std::remove_reference_t<T>>)
+    inline auto constexpr array_size_v<T> = std::extent_v<std::remove_reference_t<T>>;
 
     /* Gets a string_view for the given range, excluding the final nul char. */
     [[nodiscard]] consteval
@@ -93,13 +88,11 @@ namespace detail_ {
 template<std::ranges::contiguous_range ...Args> [[nodiscard]] consteval
 auto Concat(Args&& ...args) noexcept
 {
-    constexpr auto tmplen = (... + (detail_::get_size<Args>()-1)) + 1;
+    constexpr auto tmplen = (... + (detail_::array_size_v<Args>-1)) + 1;
     auto arr = std::array<char, tmplen>{};
     auto oiter = arr.begin();
     auto do_concat = [&oiter](std::string_view const str)
-    {
-        oiter = std::ranges::copy(str, oiter).out;
-    };
+    { oiter = std::ranges::copy(str, oiter).out; };
     (..., do_concat(detail_::get_strview(std::forward<Args>(args))));
     return arr;
 }
@@ -113,16 +106,16 @@ template<std::ranges::contiguous_range S1, std::ranges::contiguous_range ...Args
 [[nodiscard]] consteval auto QuotedList(S1&& s1, Args&& ...more) noexcept
 {
     using namespace std::string_view_literals;
-    constexpr auto tmplen = ((detail_::get_size<S1>()-1) + ... + (detail_::get_size<Args>()-1))
+    constexpr auto tmplen = ((detail_::array_size_v<S1>-1) + ... + (detail_::array_size_v<Args>-1))
         + 3*sizeof...(Args) + 5;
     auto arr = std::array<char, tmplen>{};
     auto oiter = std::ranges::copy("[\""sv, arr.begin()).out;
+
     oiter = std::ranges::copy(detail_::get_strview(std::forward<S1>(s1)), oiter).out;
-    auto do_concat = [sep=R"(",")"sv, &oiter](std::string_view const str)
-    {
-        oiter = std::ranges::copy(std::array{sep, str} | std::views::join, oiter).out;
-    };
+    auto do_concat [[maybe_unused]] = [sep=R"(",")"sv, &oiter](std::string_view const str)
+    { oiter = std::ranges::copy(std::array{sep, str} | std::views::join, oiter).out; };
     (..., do_concat(detail_::get_strview(std::forward<Args>(more))));
+
     std::ranges::copy("\"]"sv, oiter);
     return arr;
 }

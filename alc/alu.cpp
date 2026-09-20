@@ -49,12 +49,10 @@
 #include "core/bformatdec.h"
 #include "core/bs2b.h"
 #include "core/bsinc_defs.h"
-#include "core/bsinc_tables.h"
 #include "core/bufferline.h"
 #include "core/buffer_storage.h"
 #include "core/context.h"
 #include "core/cpu_caps.h"
-#include "core/cubic_tables.h"
 #include "core/devformat.h"
 #include "core/device.h"
 #include "core/effects/base.h"
@@ -67,7 +65,7 @@
 #include "core/mixer.h"
 #include "core/mixer/defs.h"
 #include "core/mixer/hrtfdefs.h"
-#include "core/resampler_limits.h"
+#include "core/resampler_limits.hpp"
 #include "core/storage_formats.h"
 #include "core/uhjfilter.h"
 #include "core/voice.h"
@@ -79,6 +77,14 @@
 #include "ringbuffer.h"
 #include "strutils.hpp"
 #include "vecmat.h"
+
+#if HAVE_CXXMODULES
+import bsinc_tables;
+import cubic_tables;
+#else
+#include "core/bsinc_tables.hpp"
+#include "core/cubic_tables.hpp"
+#endif
 
 
 static_assert((MaxResamplerPadding&1) == 0, "MaxResamplerPadding is not a multiple of two");

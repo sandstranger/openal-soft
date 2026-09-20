@@ -5,28 +5,27 @@
 
 #if HAVE_DYNLOAD && (defined(_WIN32) || defined(HAVE_DLFCN_H))
 
-#include <new>
 #include <string>
 
 #include "expected.hpp"
-#include "gsl/gsl"
+#include "zstring_view.hpp"
 
-#include "dlopennote.h"
+extern "C" struct LibHandleStruct;
+using LibHandle = LibHandleStruct*;
 
 [[nodiscard]]
-auto LoadLib(gsl::czstring name) -> al::expected<void*, std::string>;
-void CloseLib(void *handle);
+auto LoadLib(al::zstring_view name) -> al::expected<LibHandle, std::string>;
+void CloseLib(LibHandle handle);
 [[nodiscard]]
-auto GetSymbol_(void *handle, gsl::czstring name) -> al::expected<void*, std::string>;
+auto GetSymbol_(LibHandle handle, al::zstring_view name) -> al::expected<void*, std::string>;
 
 template<typename T> [[nodiscard]]
-auto GetSymbolAddress(void *const handle, gsl::czstring const name)
+auto GetSymbolAddress(LibHandle const handle, al::zstring_view const name)
     -> al::expected<T*, std::string>
 {
-    auto result = GetSymbol_(handle, name);
-    /* NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) */
-    if(result) [[likely]] return reinterpret_cast<T*>(std::move(result).value());
-    return al::unexpected(std::move(result).error());
+    return GetSymbol_(handle, name)
+        /* NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) */
+        .transform([](void *fn) { return reinterpret_cast<T*>(fn); });
 }
 
 #endif

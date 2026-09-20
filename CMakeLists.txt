@@ -243,7 +243,8 @@ option(ALSOFT_ENABLE_MODULES "Enable use of C++20 modules when supported" ON)
 set(HAVE_CXXMODULES FALSE)
 if(ALSOFT_ENABLE_MODULES)
     if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28 AND (CMAKE_GENERATOR STREQUAL "Ninja"
-            OR CMAKE_GENERATOR STREQUAL "Visual Studio 17 2022"))
+            OR CMAKE_GENERATOR STREQUAL "Visual Studio 17 2022"
+            OR CMAKE_GENERATOR STREQUAL "Visual Studio 18 2026"))
         if((CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 17.0)
             OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15.0)
             OR (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 14.34))
@@ -757,6 +758,7 @@ set(COMMON_HDRS
     common/strutils.hpp
     common/vecmat.h
     common/vector.h
+    common/zstring_view.hpp
     gsl/include/gsl/algorithm
     gsl/include/gsl/assert
     gsl/include/gsl/byte
@@ -774,10 +776,12 @@ if(HAVE_CXXMODULES)
         common/alformattypes.cppm
         common/hann_window.cppm
         common/phase_shifter.cppm
+        common/zstring_view.cppm
     )
 else()
     list(APPEND COMMON_HDRS
         common/alformattypes.hpp
+        common/alformatzsv.hpp
         common/hann_window.hpp
         common/phase_shifter.hpp
     )
@@ -791,11 +795,9 @@ set(CORE_SRCS
     core/ambidefs.cpp
     core/bformatdec.cpp
     core/bs2b.cpp
-    core/bsinc_tables.cpp
     core/context.cpp
     core/converter.cpp
     core/cpu_caps.cpp
-    core/cubic_tables.cpp
     core/devformat.cpp
     core/device.cpp
     core/effectslot.cpp
@@ -825,14 +827,14 @@ set(CORE_HDRS
     core/bformatdec.h
     core/bs2b.h
     core/bsinc_defs.h
-    core/bsinc_tables.h
+    core/bsinc_tables.hpp
     core/bufferline.h
     core/buffer_storage.h
     core/context.h
     core/converter.h
     core/cpu_caps.h
     core/cubic_defs.h
-    core/cubic_tables.h
+    core/cubic_tables.hpp
     core/decoderbase.hpp
     core/devformat.h
     core/device.h
@@ -852,14 +854,17 @@ set(CORE_HDRS
     core/hrtf_resource.hpp
     core/mastering.h
     core/mixer.h
-    core/resampler_limits.h
+    core/resampler_limits.hpp
     core/storage_formats.h
     core/tsmefilter.hpp
     core/uhjfilter.h
     core/voice.h
     core/voice_change.h)
 if(HAVE_CXXMODULES)
-    list(APPEND CORE_MODS core/logging.cppm)
+    list(APPEND CORE_MODS
+        core/bsinc_tables.cppm
+        core/cubic_tables.cppm
+        core/logging.cppm)
 else()
     list(APPEND CORE_HDRS core/logging.h)
 endif()

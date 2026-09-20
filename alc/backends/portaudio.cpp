@@ -29,6 +29,7 @@
 
 #include "alc/alconfig.h"
 #include "core/device.h"
+#include "dlopennote.h"
 #include "dynload.h"
 #include "ringbuffer.h"
 
@@ -36,7 +37,9 @@
 
 #if HAVE_CXXMODULES
 import logging;
+import zstring_view;
 #else
+#include "alformatzsv.hpp"
 #include "core/logging.h"
 #endif
 
@@ -44,8 +47,8 @@ import logging;
 namespace {
 
 #if HAVE_DYNLOAD
-void *pa_handle;
-#define MAKE_FUNC(x) decltype(x) * p##x
+auto pa_handle = LibHandle{};
+#define MAKE_FUNC(f) decltype(f)* p##f{}
 MAKE_FUNC(Pa_Initialize);
 MAKE_FUNC(Pa_Terminate);
 MAKE_FUNC(Pa_GetErrorText);
@@ -445,7 +448,7 @@ auto PortBackendFactory::init() -> bool
 #if HAVE_DYNLOAD
     if(!pa_handle)
     {
-        auto *const pa_lib = gsl::czstring{PA_LIB};
+        auto constexpr pa_lib = al::zstring_view{PA_LIB};
         if(auto const libresult = LoadLib(pa_lib))
             pa_handle = libresult.value();
         else
@@ -454,16 +457,16 @@ auto PortBackendFactory::init() -> bool
             return false;
         }
 
-        static constexpr auto load_sym = []<typename T>(T *&func, gsl::czstring const name) -> bool
+        static constexpr auto load_sym = []<typename T>(T *&func, al::zstring_view const name)
+            -> bool
         {
-            auto const funcresult = GetSymbolAddress<T>(pa_handle, name);
-            if(!funcresult)
-            {
-                WARN("Failed to load symbol {}: {}", name, funcresult.error());
-                return false;
-            }
-            func = funcresult.value();
-            return true;
+            return GetSymbolAddress<T>(pa_handle, name)
+                .transform_error([name](std::string_view const err) {
+                    WARN("Failed to load symbol {}: {}", name, err);
+                    return false;
+                })
+                .transform([&func](T *addr) { func = addr; })
+                .has_value();
         };
         auto ok = true;
 #define LOAD_FUNC(f) ok &= load_sym(p##f, #f)

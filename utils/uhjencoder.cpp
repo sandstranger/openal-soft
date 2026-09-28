@@ -39,22 +39,24 @@
 
 #include "alnumeric.h"
 #include "alstring.h"
-#include "altypes.hpp"
-#include "filesystem.h"
-#include "fmt/base.h"
-#include "fmt/ostream.h"
-#include "fmt/ranges.h"
-#include "fmt/std.h"
 #include "vector.h"
+#include "zudl.hpp"
 
 #include "sndfile.h"
 
 #include "win_main_utf8.h"
 
 #if HAVE_CXXMODULES
+import filesystem;
+import fmtlib;
 import gsl;
 import phase_shifter;
 #else
+#include "filesystem.h"
+#include "fmt/base.h"
+#include "fmt/ostream.h"
+#include "fmt/ranges.h"
+#include "fmt/std.h"
 #include "gsl/gsl"
 #include "phase_shifter.hpp"
 #endif

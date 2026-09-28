@@ -15,10 +15,10 @@
 #include <tuple>
 #include <unordered_map>
 
-#include "altypes.hpp"
 #include "alstring.h"
 #include "opthelpers.h"
 #include "strutils.hpp"
+#include "zudl.hpp"
 
 #if HAVE_CXXMODULES
 import alsoft.router;
@@ -32,6 +32,7 @@ import openal;
 #include "AL/alc.h"
 #include "AL/al.h"
 #include "AL/alext.h"
+
 #include "gsl/gsl"
 #include "router.h"
 #endif

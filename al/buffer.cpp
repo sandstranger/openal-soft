@@ -44,32 +44,35 @@
 #include "AL/al.h"
 #include "AL/alext.h"
 
-#include "alc/device.h"
 #include "alc/inprogext.h"
 #include "almalloc.h"
 #include "alnumeric.h"
-#include "core/device.h"
 #include "core/except.h"
 #include "core/resampler_limits.hpp"
 #include "core/voice.h"
 #include "direct_defs.h"
 #include "intrusive_ptr.h"
 #include "opthelpers.h"
+#include "zudl.hpp"
 
 #if ALSOFT_EAX
 #include <unordered_set>
 
+#include "eax/alapi.hpp"
 #include "eax/globals.h"
-#include "eax/x_ram.h"
 #endif // ALSOFT_EAX
 
 #if HAVE_CXXMODULES
 import alc.context;
-import format.types;
-import logging;
+import alc.device;
+import format;
 import gsl;
+import logging;
+import types;
 #else
 #include "alc/context.hpp"
+#include "alc/device.h"
+#include "alformat.hpp"
 #include "alformattypes.hpp"
 #include "core/logging.h"
 #include "gsl/gsl"

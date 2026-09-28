@@ -12,14 +12,12 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "alstring.h"
-#include "filesystem.h"
 #include "opthelpers.h"
 #include "strutils.hpp"
 
@@ -27,12 +25,15 @@
 
 #if HAVE_CXXMODULES
 import alsoft.router;
+import filesystem;
 import gsl;
 import openal.alc;
 
 #else
 
 #include "AL/alc.h"
+
+#include "filesystem.h"
 #include "gsl/gsl"
 #endif
 
@@ -365,7 +366,7 @@ void LoadDriverList()
         TRACE("Got DLL path {}", wstr_to_utf8(dll_path));
 
     auto cwd_path = std::wstring{};
-    if(auto const curpath = std::filesystem::current_path(); !curpath.empty())
+    if(auto const curpath = fs::current_path(); !curpath.empty())
     {
         if constexpr(std::same_as<decltype(curpath)::string_type, std::wstring>)
             cwd_path = curpath.native();

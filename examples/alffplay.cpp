@@ -32,12 +32,10 @@
 #include "almalloc.h"
 #include "alnumeric.h"
 #include "alstring.h"
-#include "altypes.hpp"
 #include "common/alhelpers.hpp"
-#include "fmt/base.h"
-#include "fmt/ostream.h"
 #include "opthelpers.h"
 #include "pragmadefs.h"
+#include "zudl.hpp"
 
 DIAGNOSTIC_PUSH
 std_pragma("GCC diagnostic ignored \"-Wconversion\"")
@@ -68,6 +66,7 @@ struct SwsContext;
 #include "SDL3/SDL_video.h"
 
 #if HAVE_CXXMODULES
+import fmtlib;
 import gsl;
 import openal;
 
@@ -84,6 +83,8 @@ import openal;
 #include "AL/alc.h"
 #include "AL/alext.h"
 
+#include "fmt/base.h"
+#include "fmt/ostream.h"
 #include "gsl/gsl"
 #endif
 

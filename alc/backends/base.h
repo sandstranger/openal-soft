@@ -10,11 +10,9 @@
 #include <vector>
 
 #include "alc/events.h"
-#include "alformat.hpp"
-#include "core/device.h"
-#include "core/except.h"
 #include "gsl/gsl"
-#include "opthelpers.h"
+
+struct DeviceBase;
 
 
 struct ClockLatency {
@@ -60,26 +58,14 @@ enum class BackendType {
 };
 
 
-/* Helper to get the device latency from the backend, including any fixed
- * latency from post-processing.
- */
-inline auto GetClockLatency(DeviceBase const *const device, BackendBase *const backend)
-    -> ClockLatency
-{
-    auto ret = backend->getClockLatency();
-    ret.Latency += device->FixedLatency;
-    return ret;
-}
-
-
 struct BackendFactory {
     BackendFactory() = default;
     BackendFactory(const BackendFactory&) = delete;
     BackendFactory(BackendFactory&&) = delete;
     virtual ~BackendFactory() = default;
 
-    void operator=(const BackendFactory&) = delete;
-    void operator=(BackendFactory&&) = delete;
+    auto operator=(const BackendFactory&) -> BackendFactory& = delete;
+    auto operator=(BackendFactory&&) -> BackendFactory& = delete;
 
     virtual auto init() -> bool = 0;
 
@@ -93,36 +79,5 @@ struct BackendFactory {
     virtual auto createBackend(gsl::not_null<DeviceBase*> device, BackendType type) -> BackendPtr
         = 0;
 };
-
-namespace al {
-
-enum class backend_error {
-    NoDevice,
-    DeviceError,
-    OutOfMemory
-};
-
-/* NOLINTNEXTLINE(clazy-copyable-polymorphic) Exceptions must be copyable. */
-class backend_exception final : public base_exception {
-    backend_error mErrorCode;
-
-    static auto make_string(al::string_view fmt, al::format_args args) -> std::string;
-
-public:
-    template<typename ...Args>
-    backend_exception(backend_error const code, al::format_string<Args...> fmt, Args&& ...args)
-        : base_exception{make_string(fmt.get(), al::make_format_args(args...))}, mErrorCode{code}
-    { }
-    backend_exception(const backend_exception&) = default;
-    backend_exception(backend_exception&&) = default;
-    NOINLINE ~backend_exception() override = default;
-
-    backend_exception& operator=(const backend_exception&) = default;
-    backend_exception& operator=(backend_exception&&) = default;
-
-    [[nodiscard]] auto errorCode() const noexcept -> backend_error { return mErrorCode; }
-};
-
-} // namespace al
 
 #endif /* ALC_BACKENDS_BASE_H */

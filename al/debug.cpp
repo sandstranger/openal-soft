@@ -21,7 +21,6 @@
 #include "AL/al.h"
 #include "AL/alext.h"
 
-#include "alc/device.h"
 #include "alnumeric.h"
 #include "auxeffectslot.h"
 #include "buffer.h"
@@ -32,15 +31,22 @@
 #include "filter.h"
 #include "opthelpers.h"
 #include "source.h"
+#include "zudl.hpp"
 
 #if HAVE_CXXMODULES
 import alc.context;
-import format.types;
+import alc.device;
+import format;
 import gsl;
 import logging;
+import types;
+import zstring_view;
 #else
 #include "alc/context.hpp"
+#include "alc/device.h"
+#include "alformat.hpp"
 #include "alformattypes.hpp"
+#include "alformatzsv.hpp"
 #include "core/logging.h"
 #include "gsl/gsl"
 #endif
@@ -211,8 +217,9 @@ try {
     if(!message)
         context->throw_error(AL_INVALID_VALUE, "Null message pointer");
 
-    const auto msgview = (length < 0) ? std::string_view{message}
-        : std::string_view{message, gsl::narrow<std::size_t>(length)};
+    auto tmpstr = std::string{};
+    auto const msgview = (length < 0) ? al::zstring_view{message}
+        : al::zstring_view{tmpstr.assign(message, gsl::narrow<std::size_t>(length))};
     if(msgview.size() >= MaxDebugMessageLength)
         context->throw_error(AL_INVALID_VALUE, "Debug message too long ({} >= {})", msgview.size(),
             MaxDebugMessageLength);
@@ -318,13 +325,13 @@ try {
         /* C++23 has std::views::cartesian(srcIdxs, typeIdxs, svrIdxs) for a
          * range that gives all value combinations of the given ranges.
          */
-        std::ranges::for_each(srcIdxs, [enable,typeIdxs,svrIdxs,&debug](u8::value_t const srcidx)
+        std::ranges::for_each(srcIdxs, [enable,typeIdxs,svrIdxs,&debug](u8 const srcidx)
         {
             const auto srcfilt = 1_u32<<srcidx;
-            std::ranges::for_each(typeIdxs, [enable,srcfilt,svrIdxs,&debug](u8::value_t const typeidx)
+            std::ranges::for_each(typeIdxs, [enable,srcfilt,svrIdxs,&debug](u8 const typeidx)
             {
                 const auto srctype = srcfilt | (1_u32<<typeidx);
-                std::ranges::for_each(svrIdxs, [enable,srctype,&debug](u8::value_t const svridx)
+                std::ranges::for_each(svrIdxs, [enable,srctype,&debug](u8 const svridx)
                 {
                     const auto filter = srctype | (1_u32<<svridx);
                     auto iter = std::ranges::lower_bound(debug.mFilters, filter);
@@ -436,7 +443,7 @@ try {
             std::ignore = std::ranges::find_if(context->mDebugLog | std::views::take(count),
                 [logSpan,&counter,&todo](const DebugLogEntry &entry) noexcept -> bool
             {
-                const auto tocopy = size_t{entry.mMessage.size() + 1};
+                const auto tocopy = std::size_t{entry.mMessage.size() + 1};
                 if(tocopy > logSpan.size()-counter)
                     return true;
                 counter += tocopy;
@@ -608,7 +615,7 @@ catch(std::exception &e) {
 
 
 void al::Context::sendDebugMessage(std::unique_lock<std::mutex> &debuglock, DebugSource source,
-    DebugType type, ALuint id, DebugSeverity severity, std::string_view message)
+    DebugType type, ALuint id, DebugSeverity severity, al::zstring_view message)
 {
     if(!mDebugEnabled.load(std::memory_order_relaxed)) [[unlikely]]
         return;
@@ -643,7 +650,7 @@ void al::Context::sendDebugMessage(std::unique_lock<std::mutex> &debuglock, Debu
         debuglock.unlock();
         callback(GetDebugSourceEnum(source), GetDebugTypeEnum(type), id,
             GetDebugSeverityEnum(severity), gsl::narrow_cast<ALsizei>(message.size()),
-            message.data(), param); /* NOLINT(bugprone-suspicious-stringview-data-usage) */
+            message.c_str(), param);
     }
     else
     {

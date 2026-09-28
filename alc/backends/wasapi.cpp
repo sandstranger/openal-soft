@@ -63,16 +63,17 @@
 #include <vector>
 
 #include "alc/alconfig.h"
+#include "almalloc.h"
 #include "alnumeric.h"
 #include "alstring.h"
 #include "althrd_setname.h"
 #include "comptr.h"
 #include "core/converter.h"
-#include "core/device.h"
 #include "gsl/gsl"
 #include "opthelpers.h"
 #include "ringbuffer.h"
 #include "strutils.hpp"
+#include "zudl.hpp"
 
 #if ALSOFT_UWP
 #include <winrt/Windows.Media.Core.h> // !!This is important!!
@@ -81,8 +82,6 @@
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Devices.Enumeration.h>
 #include <winrt/Windows.Media.Devices.h>
-
-#include "alstring.h"
 #endif
 
 /* Some headers seem to define these as macros for __uuidof, which is annoying
@@ -102,8 +101,14 @@ DEFINE_PROPERTYKEY(PKEY_AudioEndpoint_GUID, 0x1da5d803, 0xd492, 0x4edd, 0x8c, 0x
 #endif
 
 #if HAVE_CXXMODULES
+import backends.exception;
+import core.device;
+import format;
 import logging;
 #else
+#include "alc/backends/exception.hpp"
+#include "alformat.hpp"
+#include "core/device.h"
 #include "core/logging.h"
 #endif
 

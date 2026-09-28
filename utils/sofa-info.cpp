@@ -30,17 +30,18 @@
 #include <string_view>
 #include <vector>
 
-#include "altypes.hpp"
-#include "fmt/base.h"
 #include "sofa-support.h"
+#include "zudl.hpp"
 
 #include "mysofa.h"
 
 #include "win_main_utf8.h"
 
 #if HAVE_CXXMODULES
+import fmtlib;
 import gsl;
 #else
+#include "fmt/base.h"
 #include "gsl/gsl"
 #endif
 

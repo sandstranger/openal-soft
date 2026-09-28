@@ -24,8 +24,6 @@
 #include "buffer_storage.h"
 #include "context.h"
 #include "cpu_caps.h"
-#include "devformat.h"
-#include "device.h"
 #include "filters/biquad.h"
 #include "filters/nfc.h"
 #include "filters/splitter.h"
@@ -38,11 +36,14 @@
 #include "resampler_limits.hpp"
 #include "ringbuffer.h"
 #include "uhjfilter.h"
+#include "zudl.hpp"
 
 #if HAVE_CXXMODULES
+import core.device;
 import logging;
 #else
-#include "logging.h"
+#include "core/device.h"
+#include "core/logging.h"
 #endif
 
 
@@ -989,7 +990,7 @@ void Voice::mix(State const vstate, ContextBase *const context, nanoseconds cons
 {
     ASSUME(samplesToDo > 0);
 
-    auto &device = *context->mDevice;
+    auto &device = context->mDevice;
     auto const numSends = device.NumAuxSends;
 
     /* Get voice info */
@@ -1343,8 +1344,8 @@ void Voice::prepare(DeviceBase *device)
     else if(mAmbiOrder && device->mAmbiOrder > mAmbiOrder)
     {
         const auto ordersSpan = Is2DAmbisonic(mFmtChannels)
-            ? std::span<u8 const>{AmbiIndex::OrderFrom2DChannel}
-            : std::span<u8 const>{AmbiIndex::OrderFromChannel};
+            ? std::span<std::uint8_t const>{AmbiIndex::OrderFrom2DChannel}
+            : std::span<std::uint8_t const>{AmbiIndex::OrderFromChannel};
         const auto scales = AmbiScale::GetHFOrderScales(mAmbiOrder, device->mAmbiOrder,
             device->m2DMixing);
 

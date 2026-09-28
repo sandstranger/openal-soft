@@ -3,12 +3,20 @@
 
 #include "base.h"
 
-#include <array>
 #include <atomic>
 #include <utility>
 
+#include "core/mixparams.hpp"
+
+#if HAVE_CXXMODULES
+import backends.exception;
+import core.device;
+import format;
+#else
+#include "alc/backends/exception.hpp"
 #include "alformat.hpp"
-#include "core/devformat.h"
+#include "core/device.h"
+#endif
 
 
 namespace al {
@@ -27,7 +35,7 @@ void BackendBase::captureSamples(std::span<std::byte> outbuffer [[maybe_unused]]
 { }
 
 auto BackendBase::availableSamples() -> std::size_t
-{ return 0_uz; }
+{ return 0; }
 
 auto BackendBase::getClockLatency() -> ClockLatency
 {

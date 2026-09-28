@@ -69,12 +69,12 @@
 #include "al/auxeffectslot.h"
 #include "al/buffer.h"
 #include "al/debug.h"
+#include "al/eax/effect.h"
 #include "al/effect.h"
 #include "al/filter.h"
 #include "al/source.h"
 #include "alc/events.h"
 #include "alconfig.h"
-#include "alformat.hpp"
 #include "alnumeric.h"
 #include "alstring.h"
 #include "alu.h"
@@ -83,10 +83,9 @@
 #include "core/bformatdec.h"
 #include "core/bs2b.h"
 #include "core/cpu_caps.h"
-#include "core/devformat.h"
-#include "core/device.h"
 #include "core/effects/base.h"
 #include "core/effectslot.h"
+#include "core/except.h"
 #include "core/filters/nfc.h"
 #include "core/fpu_ctrl.h"
 #include "core/front_stablizer.h"
@@ -97,17 +96,15 @@
 #include "core/uhjfilter.h"
 #include "core/voice.h"
 #include "core/voice_change.h"
-#include "device.h"
 #include "effects/base.h"
 #include "export_list.h"
 #include "flexarray.h"
-#include "fmt/format.h"
-#include "fmt/ranges.h"
 #include "gsl/gsl"
 #include "inprogext.h"
 #include "intrusive_ptr.h"
 #include "opthelpers.h"
 #include "strutils.hpp"
+#include "zudl.hpp"
 
 #include "backends/base.h"
 #include "backends/null.h"
@@ -171,12 +168,21 @@
 
 #if HAVE_CXXMODULES
 import alc.context;
-import format.types;
+import alc.device;
+import backends.exception;
+import fmtlib;
+import format;
 import logging;
+import types;
 #else
-#include "context.hpp"
+#include "alc/backends/exception.hpp"
+#include "alc/context.hpp"
+#include "alc/device.h"
+#include "alformat.hpp"
 #include "alformattypes.hpp"
 #include "core/logging.h"
+#include "fmt/format.h"
+#include "fmt/ranges.h"
 #endif
 
 
@@ -1992,7 +1998,9 @@ auto VerifyDevice(ALCdevice *device) -> gsl::not_null<DeviceRef>
         return gsl::make_not_null(DeviceRef{*iter});
     }
     al::Device::SetGlobalError(ALC_INVALID_DEVICE);
-    throw al::base_exception{al::format("Invalid device handle {}", voidp{device})};
+    throw al::base_exception{al::assign_result{[&] {
+        return al::format("Invalid device handle {}", voidp{device});
+    }}};
 }
 
 
@@ -2010,7 +2018,9 @@ auto VerifyContext(ALCcontext *context) -> gsl::not_null<ContextRef>
         return gsl::make_not_null(ContextRef{*iter});
     }
     al::Device::SetGlobalError(ALC_INVALID_CONTEXT);
-    throw al::base_exception{al::format("Invalid context handle {}", voidp{context})};
+    throw al::base_exception{
+        al::assign_result{[&] { return al::format("Invalid context handle {}", voidp{context}); }}
+    };
 }
 
 } // namespace
@@ -2208,6 +2218,17 @@ catch(al::base_exception&) {
 DefineAlcAlias(alcGetString)
 
 namespace {
+
+/* Helper to get the device latency from the backend, including any fixed
+ * latency from post-processing.
+ */
+auto GetClockLatency(DeviceBase const *const device, BackendBase *const backend) -> ClockLatency
+{
+    auto ret = backend->getClockLatency();
+    ret.Latency += device->FixedLatency;
+    return ret;
+}
+
 auto GetIntegerv(al::Device *const device, ALCenum const param, std::span<ALCint> const values)
     -> std::size_t
 {
@@ -2523,6 +2544,7 @@ auto GetIntegerv(al::Device *const device, ALCenum const param, std::span<ALCint
     }
     return 0;
 }
+
 } // namespace
 
 ALC_API void ALC_APIENTRY alcGetIntegerv(ALCdevice *device, ALCenum param, ALCsizei size,

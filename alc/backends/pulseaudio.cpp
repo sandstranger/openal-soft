@@ -43,21 +43,26 @@
 #include "alc/alconfig.h"
 #include "alnumeric.h"
 #include "base.h"
-#include "core/devformat.h"
-#include "core/device.h"
 #include "dlopennote.h"
 #include "dynload.h"
 #include "opthelpers.h"
 #include "strutils.hpp"
+#include "zudl.hpp"
 
 #include <pulse/pulseaudio.h>
 
 #if HAVE_CXXMODULES
+import backends.exception;
+import core.device;
+import format;
 import gsl;
 import logging;
 import zstring_view;
 #else
+#include "alc/backends/exception.hpp"
+#include "alformat.hpp"
 #include "alformatzsv.hpp"
+#include "core/device.h"
 #include "core/logging.h"
 #include "gsl/gsl"
 #endif

@@ -26,6 +26,7 @@
 #include <complex>
 #include <cstdlib>
 #include <numbers>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <variant>
@@ -35,17 +36,21 @@
 #include "alnumeric.h"
 #include "core/ambidefs.h"
 #include "core/bufferline.h"
-#include "core/context.h"
-#include "core/device.h"
 #include "core/effects/base.h"
 #include "core/effectslot.h"
+#include "core/filters/splitter.h"
 #include "core/mixer.h"
 #include "core/mixer/defs.h"
 #include "intrusive_ptr.h"
+#include "zudl.hpp"
 
 #if HAVE_CXXMODULES
+import core.context;
+import core.device;
 import window.hann;
 #else
+#include "core/context.h"
+#include "core/device.h"
 #include "hann_window.hpp"
 #endif
 
@@ -172,9 +177,9 @@ void FshifterState::update(const ContextBase *context, const EffectSlotBase *slo
     const EffectProps *props_, const EffectTarget target) noexcept NONBLOCKING
 {
     auto &props = IGNORE_FUNCTION_EFFECTS(std::get<FshifterProps>(*props_));
-    auto const device = al::get_not_null(context->mDevice);
+    auto const &device = context->mDevice;
 
-    const auto step = props.Frequency / static_cast<float>(device->mSampleRate);
+    const auto step = props.Frequency / static_cast<float>(device.mSampleRate);
     std::ranges::fill(mChans | std::views::transform(&ProcessParams::mPhaseStep),
         fastf2u(std::min(step, 1.0f) * MixerFracOne));
 

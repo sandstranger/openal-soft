@@ -39,29 +39,32 @@
 #include "al/debug.h"
 #include "al/listener.h"
 #include "alc/alu.h"
-#include "alc/device.h"
 #include "alc/inprogext.h"
 #include "alnumeric.h"
 #include "atomic.h"
-#include "core/context.h"
 #include "core/mixer/defs.h"
 #include "core/voice.h"
 #include "direct_defs.h"
 #include "intrusive_ptr.h"
 #include "opthelpers.h"
 #include "strutils.hpp"
+#include "zudl.hpp"
 
 #if ALSOFT_EAX
+#include "eax/alapi.hpp"
 #include "eax/globals.h"
-#include "eax/x_ram.h"
 #endif // ALSOFT_EAX
 
 #if HAVE_CXXMODULES
 import alc.context;
+import alc.device;
+import format;
 import gsl;
 import logging;
 #else
 #include "alc/context.hpp"
+#include "alc/device.h"
+#include "alformat.hpp"
 #include "core/logging.h"
 #include "gsl/gsl"
 #endif

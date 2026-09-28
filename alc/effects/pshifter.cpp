@@ -26,6 +26,7 @@
 #include <complex>
 #include <cstdlib>
 #include <numbers>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <variant>
@@ -34,17 +35,20 @@
 #include "alnumeric.h"
 #include "core/ambidefs.h"
 #include "core/bufferline.h"
-#include "core/device.h"
 #include "core/effects/base.h"
 #include "core/effectslot.h"
+#include "core/filters/splitter.h"
 #include "core/mixer.h"
 #include "core/mixer/defs.h"
 #include "intrusive_ptr.h"
 #include "pffft.h"
+#include "zudl.hpp"
 
 #if HAVE_CXXMODULES
+import core.device;
 import window.hann;
 #else
+#include "core/device.h"
 #include "hann_window.hpp"
 #endif
 

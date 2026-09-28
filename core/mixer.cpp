@@ -9,8 +9,14 @@
 #include <utility>
 
 #include "core/ambidefs.h"
-#include "device.h"
 #include "mixer/defs.h"
+#include "mixparams.hpp"
+
+#if HAVE_CXXMODULES
+import core.device;
+#else
+#include "core/device.h"
+#endif
 
 
 auto CalcAmbiCoeffs(const float y, const float z, const float x, const float spread) noexcept

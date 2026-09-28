@@ -1,8 +1,6 @@
 #ifndef ALHELPERS_HPP
 #define ALHELPERS_HPP
 
-#include "config.h"
-
 #include <iostream>
 #include <span>
 #include <stdexcept>
@@ -10,21 +8,13 @@
 #include <string_view>
 #include <utility>
 
-#include "fmt/base.h"
-#include "fmt/ostream.h"
-
-#if HAVE_CXXMODULES
-import gsl;
-import openal.alc;
-import openal.ext;
-
-#else
-
 #include "AL/alc.h"
 #include "AL/alext.h"
 
+#include "fmt/base.h"
+#include "fmt/ostream.h"
 #include "gsl/gsl"
-#endif
+
 
 extern "C" {
 

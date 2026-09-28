@@ -1,8 +1,6 @@
 
 #include "config.h"
 
-#include "device.h"
-
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -15,21 +13,22 @@
 #include "al/effect.h"
 #include "al/filter.h"
 #include "alnumeric.h"
-#include "altypes.hpp"
 #include "atomic.h"
 #include "backends/base.h"
-#include "core/devformat.h"
 #include "core/hrtf.h"
 #include "core/mastering.h"
 #include "flexarray.h"
-#include "gsl/gsl"
 
 #if HAVE_CXXMODULES
-import format.types;
+import alc.device;
+import gsl;
 import logging;
+import types;
 #else
+#include "alc/device.h"
 #include "alformattypes.hpp"
 #include "core/logging.h"
+#include "gsl/gsl"
 #endif
 
 

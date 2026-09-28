@@ -11,18 +11,21 @@
 
 #include "hrtf_loader.hpp"
 
-#include "alformat.hpp"
 #include "alnumeric.h"
-#include "fmt/format.h"
-#include "fmt/ranges.h"
 #include "gsl/gsl"
 #include "hrtf.h"
+#include "zudl.hpp"
 
 #if HAVE_CXXMODULES
-import format.types;
+import fmtlib;
+import format;
 import logging;
+import types;
 #else
+#include "alformat.hpp"
 #include "alformattypes.hpp"
+#include "fmt/format.h"
+#include "fmt/ranges.h"
 #include "logging.h"
 #endif
 

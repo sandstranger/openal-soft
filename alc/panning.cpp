@@ -39,17 +39,14 @@
 
 #include "AL/alext.h"
 
+#include "alconfig.h"
 #include "alnumeric.h"
 #include "alstring.h"
-#include "altypes.hpp"
 #include "alu.h"
 #include "core/ambdec.h"
 #include "core/ambidefs.h"
 #include "core/bformatdec.h"
 #include "core/bs2b.h"
-#include "core/context.h"
-#include "core/devformat.h"
-#include "core/device.h"
 #include "core/effectslot.h"
 #include "core/filters/nfc.h"
 #include "core/filters/splitter.h"
@@ -58,18 +55,20 @@
 #include "core/mixer/hrtfdefs.h"
 #include "core/tsmefilter.hpp"
 #include "core/uhjfilter.h"
-#include "device.h"
 #include "flexarray.h"
 #include "intrusive_ptr.h"
 #include "opthelpers.h"
+#include "zudl.hpp"
 
 #if HAVE_CXXMODULES
 import alc.context;
-import format.types;
+import alc.device;
 import gsl;
 import logging;
+import types;
 #else
 #include "alc/context.hpp"
+#include "alc/device.h"
 #include "alformattypes.hpp"
 #include "core/logging.h"
 #include "gsl/gsl"
@@ -419,8 +418,8 @@ auto MakeDecoderView(al::Device const *const device, AmbDecConf const *const con
     const auto num_coeffs = (decoder.m3DMode==Periphonic) ? AmbiChannelsFromOrder(decoder.mOrder.c_val)
         : Ambi2DChannelsFromOrder(decoder.mOrder.c_val);
     const auto idx_map = (decoder.m3DMode == Periphonic)
-        ? std::span<u8 const>{AmbiIndex::FromACN}
-        : std::span<u8 const>{AmbiIndex::FromACN2D};
+        ? std::span<std::uint8_t const>{AmbiIndex::FromACN}
+        : std::span<std::uint8_t const>{AmbiIndex::FromACN2D};
     const auto hfmatrix = conf->HFMatrix;
     const auto lfmatrix = conf->LFMatrix;
 
@@ -506,18 +505,12 @@ auto MakeDecoderView(al::Device const *const device, AmbDecConf const *const con
         }
 
         decoder.mChannels[chan_count] = ch;
-        for(auto dst = 0_uz;dst < num_coeffs;++dst)
-        {
-            auto const src = idx_map[dst];
-            decoder.mCoeffs[chan_count][dst] = hfmatrix[chan_count][src.c_val];
-        }
+        for(auto const dst : std::views::iota(0_uz, num_coeffs))
+            decoder.mCoeffs[chan_count][dst] = hfmatrix[chan_count][idx_map[dst]];
         if(conf->FreqBands > 1)
         {
-            for(auto dst = 0_uz;dst < num_coeffs;++dst)
-            {
-                auto const src = idx_map[dst];
-                decoder.mCoeffsLF[chan_count][dst] = lfmatrix[chan_count][src.c_val];
-            }
+            for(auto const dst : std::views::iota(0_uz, num_coeffs))
+                decoder.mCoeffsLF[chan_count][dst] = lfmatrix[chan_count][idx_map[dst]];
         }
         ++chan_count;
     }
@@ -778,8 +771,8 @@ auto InitPanning(al::Device *const device, bool const hqdec=false, bool const st
         }
 
         const auto ordermap = (decoder.m3DMode == Periphonic)
-            ? std::span<u8 const>{AmbiIndex::OrderFromChannel}
-            : std::span<u8 const>{AmbiIndex::OrderFrom2DChannel};
+            ? std::span<std::uint8_t const>{AmbiIndex::OrderFromChannel}
+            : std::span<std::uint8_t const>{AmbiIndex::OrderFrom2DChannel};
 
         chancoeffs.resize(std::max(chancoeffs.size(), idx+1_zu), ChannelDec{});
         std::ranges::transform(decoder.mCoeffs[i] | std::views::take(ambicount), ordermap,
@@ -1440,8 +1433,8 @@ void aluInitRenderer(al::Device *const device, int const hrtf_id,
 
 void aluInitEffectPanning(EffectSlotBase *slot, al::Context *context)
 {
-    auto const device = al::get_not_null(context->mDevice);
-    auto const count = AmbiChannelsFromOrder(device->mAmbiOrder);
+    auto &device = context->mDevice;
+    auto const count = AmbiChannelsFromOrder(device.mAmbiOrder);
 
     slot->mWetBuffer.resize(count);
 

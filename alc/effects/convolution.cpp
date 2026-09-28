@@ -28,21 +28,28 @@
 #include "core/ambidefs.h"
 #include "core/bufferline.h"
 #include "core/buffer_storage.h"
-#include "core/context.h"
-#include "core/devformat.h"
-#include "core/device.h"
 #include "core/effects/base.h"
 #include "core/effectslot.h"
 #include "core/filters/splitter.h"
 #include "core/fmt_traits.h"
 #include "core/mixer.h"
 #include "core/uhjfilter.h"
-#include "gsl/gsl"
 #include "intrusive_ptr.h"
 #include "pffft.h"
 #include "polyphase_resampler.h"
 #include "vecmat.h"
 #include "vector.h"
+#include "zudl.hpp"
+
+#if HAVE_CXXMODULES
+import core.context;
+import core.device;
+import gsl;
+#else
+#include "core/context.h"
+#include "core/device.h"
+#include "gsl/gsl"
+#endif
 
 
 namespace {
@@ -484,8 +491,8 @@ void ConvolutionState::update(const ContextBase *context, const EffectSlotBase *
     const float gain{slot->Gain};
     if(IsAmbisonic(mChannels))
     {
-        auto const device = al::get_not_null(context->mDevice);
-        if(mChannels == FmtUHJ2 && !std::holds_alternative<UhjPostProcess>(device->mPostProcess))
+        auto const &device = context->mDevice;
+        if(mChannels == FmtUHJ2 && !std::holds_alternative<UhjPostProcess>(device.mPostProcess))
         {
             mMix = &ConvolutionState::UpsampleMix;
             mChans[0].mHfScale = 1.0f;
@@ -495,11 +502,11 @@ void ConvolutionState::update(const ContextBase *context, const EffectSlotBase *
             mChans[2].mHfScale = 1.0f;
             mChans[2].mLfScale = DecoderBase::sXYLFScale;
         }
-        else if(device->mAmbiOrder > mAmbiOrder)
+        else if(device.mAmbiOrder > mAmbiOrder)
         {
             mMix = &ConvolutionState::UpsampleMix;
-            const auto scales = AmbiScale::GetHFOrderScales(mAmbiOrder, device->mAmbiOrder,
-                device->m2DMixing);
+            const auto scales = AmbiScale::GetHFOrderScales(mAmbiOrder, device.mAmbiOrder,
+                device.m2DMixing);
             mChans[0].mHfScale = scales[0];
             mChans[0].mLfScale = 1.0f;
             for(size_t i{1};i < mChans.size();++i)
@@ -533,7 +540,7 @@ void ConvolutionState::update(const ContextBase *context, const EffectSlotBase *
         std::array<float,MaxAmbiChannels> coeffs{};
         for(size_t c{0u};c < mChans.size();++c)
         {
-            auto const acn = std::size_t{index_map[c].c_val};
+            auto const acn = std::size_t{index_map[c]};
             auto const scale = scales[acn];
 
             std::ranges::transform(mixmatrix[acn], coeffs.begin(), [scale](const float in) -> float
@@ -544,7 +551,7 @@ void ConvolutionState::update(const ContextBase *context, const EffectSlotBase *
     }
     else
     {
-        auto const device = al::get_not_null(context->mDevice);
+        auto const &device = context->mDevice;
         auto chanmap = std::span<const ChanPosMap>{};
         switch(mChannels)
         {
@@ -565,7 +572,7 @@ void ConvolutionState::update(const ContextBase *context, const EffectSlotBase *
         }
 
         mOutTarget = target.Main->Buffer;
-        if(device->mRenderMode == RenderMode::Pairwise)
+        if(device.mRenderMode == RenderMode::Pairwise)
         {
             /* Scales the azimuth of the given vector by 3 if it's in front.
              * Effectively scales +/-30 degrees to +/-90 degrees, leaving > +90

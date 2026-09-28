@@ -743,12 +743,14 @@ set(COMMON_HDRS
     common/altypes.hpp
     common/atomic.h
     common/bitset.hpp
+    common/cemath.hpp
     common/comptr.h
     common/dynload.h
     common/dlopennote.h
     common/expected.hpp
     common/filesystem.h
     common/flexarray.h
+    common/ghc_filesystem.h
     common/intrusive_ptr.h
     common/opthelpers.h
     common/pffft.h
@@ -759,6 +761,7 @@ set(COMMON_HDRS
     common/vecmat.h
     common/vector.h
     common/zstring_view.hpp
+    common/zudl.hpp
     gsl/include/gsl/algorithm
     gsl/include/gsl/assert
     gsl/include/gsl/byte
@@ -772,8 +775,12 @@ set(COMMON_HDRS
 )
 if(HAVE_CXXMODULES)
     list(APPEND COMMON_MODS
+        alsoft-modules/fmtlib.cppm
         alsoft-modules/gsl.cppm
-        common/alformattypes.cppm
+        common/alformat.cppm
+        common/altypes.cppm
+        common/cemath.cppm
+        common/filesystem.cppm
         common/hann_window.cppm
         common/phase_shifter.cppm
         common/zstring_view.cppm
@@ -854,6 +861,7 @@ set(CORE_HDRS
     core/hrtf_resource.hpp
     core/mastering.h
     core/mixer.h
+    core/mixparams.hpp
     core/resampler_limits.hpp
     core/storage_formats.h
     core/tsmefilter.hpp
@@ -863,7 +871,9 @@ set(CORE_HDRS
 if(HAVE_CXXMODULES)
     list(APPEND CORE_MODS
         core/bsinc_tables.cppm
+        core/context.cppm
         core/cubic_tables.cppm
+        core/device.cppm
         core/logging.cppm)
 else()
     list(APPEND CORE_HDRS core/logging.h)
@@ -992,7 +1002,9 @@ set(ALC_HDRS
     alc/export_list.h
     alc/inprogext.h)
 if(HAVE_CXXMODULES)
-    list(APPEND CORE_MODS alc/context.cppm)
+    list(APPEND CORE_MODS
+        alc/context.cppm
+        alc/device.cppm)
 endif()
 
 if(ALSOFT_EAX)
@@ -1003,9 +1015,9 @@ if(ALSOFT_EAX)
         al/eax/exception.cpp
         al/eax/fx_slot_index.cpp
         al/eax/fx_slots.cpp
-        al/eax/utils.cpp
     )
     list(APPEND OPENAL_HDRS
+        al/eax/alapi.hpp
         al/eax/api.h
         al/eax/call.h
         al/eax/effect.h
@@ -1013,9 +1025,13 @@ if(ALSOFT_EAX)
         al/eax/fx_slot_index.h
         al/eax/fx_slots.h
         al/eax/globals.h
-        al/eax/utils.h
-        al/eax/x_ram.h
+        al/eax/presets.hpp
     )
+    if(HAVE_CXXMODULES)
+        list(APPEND CORE_MODS al/eax/validator.cppm)
+    else()
+        list(APPEND OPENAL_HDRS al/eax/validator.hpp)
+    endif()
 endif()
 
 # Include SIMD mixers
@@ -1071,6 +1087,11 @@ else()
 endif()
 
 set(BACKENDS "")
+if(HAVE_CXXMODULES)
+    list(APPEND CORE_MODS alc/backends/exception.cppm)
+else()
+    list(APPEND ALC_HDRS alc/backends/exception.hpp)
+endif()
 list(APPEND ALC_SRCS
     alc/backends/base.cpp
     # Default backends, always available
@@ -1754,7 +1775,7 @@ else()
                 "ALC_API=${EXPORT_DECL}" "AL_API=${EXPORT_DECL}" ${CPP_DEFS})
             target_compile_options(alsoft.router-modules PRIVATE ${C_FLAGS})
             target_link_libraries(alsoft.router-modules PRIVATE Threads::Threads alsoft::fmt
-                PUBLIC alsoft::buildapi-modules)
+                PUBLIC alsoft::buildapi-modules alsoft::common)
             set_target_properties(alsoft.router-modules PROPERTIES ${ALSOFT_STD_VERSION_PROPS}
                 POSITION_INDEPENDENT_CODE TRUE)
             set(ROUTER_MODULES_TARGET alsoft.router-modules)

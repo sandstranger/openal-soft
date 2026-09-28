@@ -9,8 +9,8 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <functional>
+#include <istream>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -18,16 +18,15 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
 
-#include "alformat.hpp"
 #include "almalloc.h"
 #include "alnumeric.h"
 #include "alstring.h"
 #include "ambidefs.h"
-#include "filesystem.h"
 #include "filters/splitter.h"
 #include "gsl/gsl"
 #include "helpers.h"
@@ -35,10 +34,15 @@
 #include "hrtf_resource.hpp"
 #include "mixer/hrtfdefs.h"
 #include "polyphase_resampler.h"
+#include "zudl.hpp"
 
 #if HAVE_CXXMODULES
+import filesystem;
+import format;
 import logging;
 #else
+#include "alformat.hpp"
+#include "filesystem.h"
 #include "logging.h"
 #endif
 
@@ -282,10 +286,7 @@ void DirectHrtfState::build(HrtfStore const *const Hrtf, unsigned const irSize,
     std::ranges::transform(std::views::iota(0_uz, mChannels.size()), (mChannels
         | std::views::transform(&HrtfChannelState::mHfScale)).begin(),
         [AmbiOrderHFGain](std::size_t const idx)
-    {
-        auto const order = AmbiIndex::OrderFromChannel[idx];
-        return AmbiOrderHFGain[order.c_val];
-    });
+    { return AmbiOrderHFGain[AmbiIndex::OrderFromChannel[idx]]; });
 
     auto min_delay = unsigned{HrtfHistoryLength * HrirDelayFracOne};
     auto max_delay = 0u;
@@ -488,7 +489,7 @@ try {
 
     auto const loadlock = std::lock_guard{LoadedHrtfLock};
     auto handle = std::lower_bound(LoadedHrtfs.begin(), LoadedHrtfs.end(), fname,
-        [devrate](LoadedHrtf const &hrtf, std::string const &filename) -> bool
+        [devrate](LoadedHrtf const &hrtf, std::string_view const filename) -> bool
     {
         return hrtf.mSampleRate < devrate
             || (hrtf.mSampleRate == devrate && hrtf.mFilename < filename);

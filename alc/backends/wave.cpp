@@ -30,8 +30,8 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
-#include <fstream>
 #include <functional>
+#include <ostream>
 #include <system_error>
 #include <thread>
 #include <vector>
@@ -39,14 +39,23 @@
 #include "alc/alconfig.h"
 #include "alstring.h"
 #include "althrd_setname.h"
-#include "core/device.h"
-#include "filesystem.h"
-#include "gsl/gsl"
+#include "core/ambidefs.h"
+#include "zudl.hpp"
 
 #if HAVE_CXXMODULES
+import backends.exception;
+import core.device;
+import filesystem;
+import gsl;
 import logging;
+import types;
 #else
+#include "alc/backends/exception.hpp"
+#include "altypes.hpp"
+#include "core/device.h"
 #include "core/logging.h"
+#include "filesystem.h"
+#include "gsl/gsl"
 #endif
 
 
@@ -137,7 +146,7 @@ struct WaveBackend final : public BackendBase {
     void start() override;
     void stop() override;
 
-    std::ofstream mFile;
+    fs::ofstream mFile;
     std::streamoff mDataStart{-1};
 
     std::vector<char> mBuffer;

@@ -43,11 +43,17 @@
 #include "alc/effects/base.h"
 #include "core/ambidefs.h"
 #include "core/bufferline.h"
-#include "core/device.h"
 #include "core/effects/base.h"
 #include "core/effectslot.h"
 #include "core/mixer/defs.h"
 #include "intrusive_ptr.h"
+#include "zudl.hpp"
+
+#if HAVE_CXXMODULES
+import core.device;
+#else
+#include "core/device.h"
+#endif
 
 struct BufferStorage;
 struct ContextBase;

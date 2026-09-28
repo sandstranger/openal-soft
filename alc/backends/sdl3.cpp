@@ -31,13 +31,10 @@
 #include <string_view>
 #include <utility>
 
-#include "alformat.hpp"
 #include "alnumeric.h"
-#include "altypes.hpp"
-#include "core/device.h"
-#include "gsl/gsl"
 #include "pragmadefs.h"
 #include "ringbuffer.h"
+#include "zudl.hpp"
 
 DIAGNOSTIC_PUSH
 std_pragma("GCC diagnostic ignored \"-Wold-style-cast\"")
@@ -52,9 +49,19 @@ constexpr auto DefaultCaptureDeviceID = SDL_AUDIO_DEVICE_DEFAULT_RECORDING;
 DIAGNOSTIC_POP;
 
 #if HAVE_CXXMODULES
+import backends.exception;
+import core.device;
+import format;
+import gsl;
 import logging;
+import types;
 #else
+#include "alc/backends/exception.hpp"
+#include "alformat.hpp"
+#include "altypes.hpp"
+#include "core/device.h"
 #include "core/logging.h"
+#include "gsl/gsl"
 #endif
 
 

@@ -22,13 +22,13 @@
 #include "almalloc.h"
 #include "alnumeric.h"
 #include "alstring.h"
-#include "filesystem.h"
-#include "gsl/gsl"
 #include "strutils.hpp"
 
 #if HAVE_CXXMODULES
+import filesystem;
 import logging;
 #else
+#include "filesystem.h"
 #include "logging.h"
 #endif
 
@@ -76,7 +76,6 @@ void DirectorySearch(const fs::path &path, const std::string_view ext,
 } // namespace
 
 #ifdef _WIN32
-
 #include <cctype>
 #include <shlobj.h>
 

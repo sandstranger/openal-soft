@@ -33,8 +33,6 @@
 #include "alnumeric.h"
 #include "core/ambidefs.h"
 #include "core/bufferline.h"
-#include "core/context.h"
-#include "core/device.h"
 #include "core/effects/base.h"
 #include "core/effectslot.h"
 #include "core/filters/biquad.h"
@@ -45,11 +43,16 @@
 #include "intrusive_ptr.h"
 #include "opthelpers.h"
 #include "vector.h"
+#include "zudl.hpp"
 
 #if HAVE_CXXMODULES
+import core.context;
+import core.device;
 import cubic_tables;
 #else
+#include "core/context.h"
 #include "core/cubic_tables.hpp"
+#include "core/device.h"
 #endif
 
 struct BufferStorage;
@@ -1228,8 +1231,8 @@ void ReverbState::update(ContextBase const *const context, EffectSlotBase const 
     EffectProps const *const props, EffectTarget const target) noexcept NONBLOCKING
 {
     auto &reverbprops = IGNORE_FUNCTION_EFFECTS(std::get<ReverbProps>(*props));
-    const auto device = al::get_not_null(context->mDevice);
-    const auto frequency = static_cast<float>(device->mSampleRate);
+    const auto &device = context->mDevice;
+    const auto frequency = static_cast<float>(device.mSampleRate);
 
     /* If the HF limit parameter is flagged, calculate an appropriate limit
      * based on the air absorption parameter.

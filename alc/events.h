@@ -2,18 +2,16 @@
 #define ALC_EVENTS_H
 
 #include "inprogext.h"
-#include "opthelpers.h"
 
+#include <cstdint>
 #include <mutex>
 #include <optional>
-#include <string_view>
 
-#include "altypes.hpp"
-#include "bitset.hpp"
+#include "zstring_view.hpp"
 
 namespace alc {
 
-enum class EventType : u8::value_t {
+enum class EventType : std::uint8_t {
     DefaultDeviceChanged,
     DeviceAdded,
     DeviceRemoved,
@@ -21,7 +19,7 @@ enum class EventType : u8::value_t {
     MaxValue = DeviceRemoved
 };
 
-std::optional<EventType> GetEventType(ALCenum type);
+auto GetEventType(ALCenum type) -> std::optional<EventType>;
 
 enum class EventSupport : ALCenum {
     FullSupport = ALC_EVENT_SUPPORTED_SOFT,
@@ -33,14 +31,17 @@ enum class DeviceType : ALCenum {
     Capture = ALC_CAPTURE_DEVICE_SOFT,
 };
 
-inline std::mutex EventMutex;
+inline auto EventMutex = std::mutex{};
 
-inline ALCEVENTPROCTYPESOFT EventCallback{};
+inline auto EventCallback = ALCEVENTPROCTYPESOFT{};
 inline void *EventUserPtr{};
 
-void Event(EventType eventType, DeviceType deviceType, ALCdevice *device, std::string_view message) noexcept;
+auto Event(EventType eventType, DeviceType deviceType, ALCdevice *device, al::zstring_view message)
+    noexcept -> void;
 
-inline void Event(EventType eventType, DeviceType deviceType, std::string_view message) noexcept
+inline
+auto Event(EventType const eventType, DeviceType const deviceType, al::zstring_view const message)
+    noexcept -> void
 { Event(eventType, deviceType, nullptr, message); }
 
 } // namespace alc

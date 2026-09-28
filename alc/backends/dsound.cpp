@@ -40,10 +40,10 @@
 #include <thread>
 #include <vector>
 
+#include "almalloc.h"
 #include "alnumeric.h"
 #include "althrd_setname.h"
 #include "comptr.h"
-#include "core/device.h"
 #include "core/helpers.h"
 #include "dynload.h"
 #include "ringbuffer.h"
@@ -83,11 +83,17 @@ DEFINE_GUID(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT, 0x00000003, 0x0000, 0x0010, 0x80, 0
 #endif
 
 #if HAVE_CXXMODULES
+import backends.exception;
+import core.device;
+import format;
 import gsl;
 import logging;
 import zstring_view;
 #else
+#include "alc/backends/exception.hpp"
+#include "alformat.hpp"
 #include "alformatzsv.hpp"
+#include "core/device.h"
 #include "core/logging.h"
 #include "gsl/gsl"
 #endif

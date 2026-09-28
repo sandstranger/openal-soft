@@ -634,6 +634,8 @@ public:
 
 } /* namespace al */
 
+inline namespace altypeops {
+
 /* Prefix and postfix increment and decrement operators. Only valid for
  * integral types.
  */
@@ -921,6 +923,7 @@ template<al::strict_number T> [[nodiscard]] force_inline constexpr
 auto operator==(T const &lhs, al::ConstantNum<typename T::value_t> const &rhs) noexcept -> bool
 { return (lhs <=> rhs) == 0; }
 
+}
 
 #define DECL_NUMBERTYPE(SelfType, ValueType)                                  \
 struct [[nodiscard]] SelfType : al::number_base<ValueType, SelfType> {        \
@@ -1046,16 +1049,6 @@ auto operator ""_isize(unsigned long long const n) noexcept NONBLOCKING
 auto operator ""_usize(unsigned long long const n) noexcept NONBLOCKING
 { return IGNORE_FUNCTION_EFFECTS(usize::from(n)); }
 
-[[nodiscard]] consteval
-auto operator ""_z(unsigned long long const n) noexcept NONBLOCKING
-{ return IGNORE_FUNCTION_EFFECTS(al::convert_to<isize::value_t>(n)); }
-[[nodiscard]] consteval
-auto operator ""_uz(unsigned long long const n) noexcept NONBLOCKING
-{ return IGNORE_FUNCTION_EFFECTS(al::convert_to<std::size_t>(n)); }
-[[nodiscard]] consteval
-auto operator ""_zu(unsigned long long const n) noexcept NONBLOCKING
-{ return IGNORE_FUNCTION_EFFECTS(al::convert_to<std::size_t>(n)); }
-
 
 namespace std {
 
@@ -1128,6 +1121,7 @@ struct common_type<T, U> : common_type<al::make_strict_t<T>, U> { };
 
 } /* namespace std */
 
+inline namespace altypeops {
 
 template<al::strict_integral T> [[nodiscard]] force_inline constexpr
 auto popcount(T const &x) noexcept -> sys_uint { return x.popcount(); }
@@ -1196,5 +1190,7 @@ auto lerp(T const &a, T const &b, T const &t) noexcept -> T
 [[nodiscard]] constexpr
 auto lerpf(f32 const val1, f32 const val2, f32 const mu) noexcept -> f32
 { return val1 + (val2-val1)*mu; }
+
+}
 
 #endif /* AL_TYPES_HPP */

@@ -39,9 +39,8 @@
 #include "alnumeric.h"
 #include "alstring.h"
 #include "core/converter.h"
-#include "core/device.h"
-#include "gsl/gsl"
 #include "ringbuffer.h"
+#include "zudl.hpp"
 
 #include <AudioUnit/AudioUnit.h>
 #include <AudioToolbox/AudioToolbox.h>
@@ -54,9 +53,17 @@
 #endif
 
 #if HAVE_CXXMODULES
+import backends.exception;
+import core.device;
+import format;
+import gsl;
 import logging;
 #else
+#include "alc/backends/exception.hpp"
+#include "alformat.hpp"
+#include "core/device.h"
 #include "core/logging.h"
+#include "gsl/gsl"
 #endif
 
 namespace {

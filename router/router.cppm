@@ -11,12 +11,11 @@ module;
 #include <utility>
 #include <vector>
 
-#include "fmt/base.h"
-#include "fmt/ostream.h"
-
 
 export module alsoft.router;
 
+import filesystem;
+import fmtlib;
 import openal;
 
 export {
@@ -194,10 +193,10 @@ enum class eLogLevel {
     Trace = 3,
 };
 inline eLogLevel LogLevel{eLogLevel::Error};
-inline std::ofstream LogFile; /* NOLINT(cert-err58-cpp) */
+inline fs::ofstream LogFile; /* NOLINT(cert-err58-cpp) */
 
 template<typename ...Args>
-inline void TRACE(fmt::format_string<Args...> fmt, Args&& ...args)
+void TRACE(fmt::format_string<Args...> fmt, Args&& ...args)
 {
     if(LogLevel >= eLogLevel::Trace)
     {
@@ -209,7 +208,7 @@ inline void TRACE(fmt::format_string<Args...> fmt, Args&& ...args)
 }
 
 template<typename ...Args>
-inline void WARN(fmt::format_string<Args...> fmt, Args&& ...args)
+void WARN(fmt::format_string<Args...> fmt, Args&& ...args)
 {
     if(LogLevel >= eLogLevel::Warn)
     {
@@ -221,7 +220,7 @@ inline void WARN(fmt::format_string<Args...> fmt, Args&& ...args)
 }
 
 template<typename ...Args>
-inline void ERR(fmt::format_string<Args...> fmt, Args&& ...args)
+void ERR(fmt::format_string<Args...> fmt, Args&& ...args)
 {
     if(LogLevel >= eLogLevel::Error)
     {

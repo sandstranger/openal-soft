@@ -46,12 +46,19 @@
 #include "alnumeric.h"
 #include "core/ambidefs.h"
 #include "core/bufferline.h"
-#include "core/context.h"
-#include "core/device.h"
 #include "core/effects/base.h"
 #include "core/effectslot.h"
 #include "core/mixer.h"
 #include "intrusive_ptr.h"
+#include "zudl.hpp"
+
+#if HAVE_CXXMODULES
+import core.context;
+import core.device;
+#else
+#include "core/context.h"
+#include "core/device.h"
+#endif
 
 struct BufferStorage;
 
@@ -240,8 +247,8 @@ void VmorpherState::update(const ContextBase *context, const EffectSlotBase *slo
     const EffectProps *props_, const EffectTarget target) noexcept NONBLOCKING
 {
     auto &props = IGNORE_FUNCTION_EFFECTS(std::get<VmorpherProps>(*props_));
-    const auto device = al::get_not_null(context->mDevice);
-    const auto frequency = static_cast<float>(device->mSampleRate);
+    auto const &device = context->mDevice;
+    const auto frequency = static_cast<float>(device.mSampleRate);
     const auto step = props.Rate / frequency;
     mStep = fastf2u(std::clamp(step*WaveformFracOne, 0.0f, WaveformFracOne-1.0f));
 

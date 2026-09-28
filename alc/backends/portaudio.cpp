@@ -28,19 +28,25 @@
 #include <utility>
 
 #include "alc/alconfig.h"
-#include "core/device.h"
 #include "dlopennote.h"
 #include "dynload.h"
 #include "ringbuffer.h"
+#include "zudl.hpp"
 
 #include <portaudio.h>
 
 #if HAVE_CXXMODULES
+import backends.exception;
+import core.device;
+import gsl;
 import logging;
 import zstring_view;
 #else
+#include "alc/backends/exception.hpp"
 #include "alformatzsv.hpp"
+#include "core/device.h"
 #include "core/logging.h"
+#include "gsl/gsl"
 #endif
 
 

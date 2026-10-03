@@ -33,19 +33,19 @@
 #include <memory>
 #include <ranges>
 #include <span>
-#include <string>
 #include <string_view>
 #include <vector>
 
 #include "alnumeric.h"
 
-#include "common/alhelpers.h"
 #include "win_main_utf8.h"
 
 #if HAVE_CXXMODULES
+import alhelpers;
 import fmtlib;
 import gsl;
 import openal;
+import zstring_view;
 
 #else
 
@@ -53,6 +53,8 @@ import openal;
 #include "AL/al.h"
 #include "AL/alext.h"
 
+#include "alformatzsv.hpp"
+#include "common/alhelpers.hpp"
 #include "fmt/base.h"
 #include "fmt/ostream.h"
 #include "fmt/std.h"
@@ -113,7 +115,7 @@ constexpr auto GetDebugSeverityName(ALenum severity) noexcept -> std::string_vie
 }
 
 
-auto main(std::span<std::string_view> args) -> int
+auto main(std::span<al::zstring_view> args) -> int
 {
     /* Print out usage if -h was specified */
     if(args.size() > 1 && (args[1] == "-h" || args[1] == "--help"))
@@ -128,7 +130,7 @@ auto main(std::span<std::string_view> args) -> int
     auto device = DevicePtr{};
     if(args.size() > 1 && args[0] == "-device")
     {
-        device = DevicePtr{alcOpenDevice(std::string{args[1]}.c_str())};
+        device = DevicePtr{alcOpenDevice(args[1].c_str())};
         if(!device)
             fmt::println(std::cerr, "Failed to open \"{}\", trying default", args[1]);
         args = args.subspan(2);
@@ -293,7 +295,7 @@ auto main(std::span<std::string_view> args) -> int
 
 int main(int argc, char **argv)
 {
-    auto args = std::vector<std::string_view>(gsl::narrow<unsigned int>(argc));
+    auto args = std::vector<al::zstring_view>(gsl::narrow<unsigned>(argc));
     std::ranges::copy(std::views::counted(argv, argc), args.begin());
     return main(std::span{args});
 }

@@ -29,6 +29,7 @@
 #include "config.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <limits>
 #include <iostream>
@@ -37,20 +38,20 @@
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <string_view>
+#include <thread>
 #include <variant>
 #include <vector>
 
 #include "sndfile.h"
 
-#include "common/alhelpers.h"
-
 #include "win_main_utf8.h"
 
 #if HAVE_CXXMODULES
+import alhelpers;
 import fmtlib;
 import gsl;
 import openal;
+import zstring_view;
 
 #else
 
@@ -58,6 +59,8 @@ import openal;
 #include "AL/alc.h"
 #include "AL/alext.h"
 
+#include "alformatzsv.hpp"
+#include "common/alhelpers.hpp"
 #include "fmt/base.h"
 #include "fmt/ostream.h"
 #include "gsl/gsl"
@@ -100,11 +103,11 @@ using SndFilePtr = std::unique_ptr<SNDFILE, decltype([](SNDFILE *sndfile) { sf_c
 /* LoadBuffer loads the named audio file into an OpenAL buffer object, and
  * returns the new buffer ID.
  */
-auto LoadSound(ALCcontext *context, const std::string_view filename) -> ALuint
+auto LoadSound(ALCcontext *context, al::zstring_view const filename) -> ALuint
 {
     /* Open the audio file and check that it's usable. */
     auto sfinfo = SF_INFO{};
-    auto sndfile = SndFilePtr{sf_open(std::string{filename}.c_str(), SFM_READ, &sfinfo)};
+    auto sndfile = SndFilePtr{sf_open(filename.c_str(), SFM_READ, &sfinfo)};
     if(!sndfile)
     {
         fmt::println(std::cerr, "Could not open audio in {}: {}", filename,
@@ -337,7 +340,7 @@ auto LoadSound(ALCcontext *context, const std::string_view filename) -> ALuint
 }
 
 
-auto main(std::span<std::string_view> args) -> int
+auto main(std::span<al::zstring_view> args) -> int
 {
     /* Print out usage if no arguments were specified */
     if(args.size() < 2)
@@ -352,7 +355,7 @@ auto main(std::span<std::string_view> args) -> int
     ALCdevice *device{};
     if(args.size() > 1 && args[0] == "-device")
     {
-        device = p_alcOpenDevice(std::string{args[1]}.c_str());
+        device = p_alcOpenDevice(args[1].c_str());
         if(!device)
             fmt::println(std::cerr, "Failed to open \"{}\", trying default", args[1]);
         args = args.subspan(2);
@@ -469,7 +472,7 @@ auto main(std::span<std::string_view> args) -> int
     alSourcePlayDirect(context, source);
     auto state = ALenum{};
     do {
-        al_nssleep(10000000);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
         alGetSourceiDirect(context, source, AL_SOURCE_STATE, &state);
 
         /* Get the source offset. */
@@ -494,7 +497,7 @@ auto main(std::span<std::string_view> args) -> int
 
 auto main(int argc, char **argv) -> int
 {
-    auto args = std::vector<std::string_view>(gsl::narrow<unsigned int>(argc));
+    auto args = std::vector<al::zstring_view>(gsl::narrow<unsigned>(argc));
     std::ranges::copy(std::views::counted(argv, argc), args.begin());
     return main(std::span{args});
 }

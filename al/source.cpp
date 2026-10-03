@@ -195,7 +195,7 @@ enum class SourceProp : ALenum {
 
 
 constexpr auto HasBuffer(al::BufferQueueItem const &item) noexcept -> bool
-{ return bool{item.mBuffer}; }
+{ return item.mBuffer != nullptr; }
 
 
 auto GetSourceVoice(gsl::not_null<al::Source*> const source,
@@ -3697,12 +3697,10 @@ AL_API void AL_APIENTRY alSourceQueueBufferLayersSOFT(ALuint, ALsizei, const ALu
 
 
 al::Source::Source() noexcept
+    : mDirect{.mGain=1.0f, .mGainHF=1.0f, .mHFReference=LowPassFreqRef, .mGainLF=1.0f,
+        .mLFReference=HighPassFreqRef}
+    , mSend{}
 {
-    mDirect.mGain = 1.0f;
-    mDirect.mGainHF = 1.0f;
-    mDirect.mHFReference = LowPassFreqRef;
-    mDirect.mGainLF = 1.0f;
-    mDirect.mLFReference = HighPassFreqRef;
     mSend.fill(SendData{.mSlot={}, .mGain=1.0f,
         .mGainHF=1.0f, .mHFReference=LowPassFreqRef,
         .mGainLF=1.0f, .mLFReference=HighPassFreqRef});

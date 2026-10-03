@@ -22,8 +22,9 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
-#include <cstdlib>
+#include <cstdint>
 #include <limits>
 #include <numbers>
 #include <optional>
@@ -111,7 +112,7 @@ struct ChorusState final : EffectState {
 
 
     struct OutParams {
-        unsigned mTargetChannel{InvalidChannelIndex.c_val};
+        unsigned mTargetChannel{InvalidChannelIndex};
 
         /* Current and target gain for this channel. */
         float mCurrentGain{};
@@ -148,7 +149,7 @@ void ChorusState::deviceUpdate(const DeviceBase *device, const BufferStorage*)
     static constexpr auto MaxDelay = std::max(ChorusMaxDelay, FlangerMaxDelay);
     const auto frequency = static_cast<float>(device->mSampleRate);
 
-    const auto maxlen = std::size_t{NextPowerOf2(float2uint(MaxDelay*2.0f*frequency) + 1u)}
+    const auto maxlen = std::size_t{std::bit_ceil(float2uint(MaxDelay*2.0f*frequency) + 1u)}
         * NumLines;
     if(maxlen != mDelayBuffers.size())
         decltype(mDelayBuffers)(maxlen).swap(mDelayBuffers);
@@ -235,11 +236,11 @@ void ChorusState::update(const ContextBase *context, const EffectSlotBase *slot,
 
     mOutTarget = target.Main->Buffer;
     target.Main->setAmbiMixParams(slot->Wet, slot->Gain,
-        [this](std::size_t const idx, u8 const outchan, float const outgain)
+        [this](std::size_t const idx, std::uint8_t const outchan, float const outgain)
     {
         if(idx < mChans.size())
         {
-            mChans[idx].mTargetChannel = outchan.c_val;
+            mChans[idx].mTargetChannel = outchan;
             mChans[idx].mTargetGain = outgain;
         }
     });

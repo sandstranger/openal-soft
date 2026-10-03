@@ -81,6 +81,7 @@
 #include <span>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "alcomplex.h"
@@ -94,7 +95,9 @@
 import filesystem;
 import fmtlib;
 import gsl;
+import zstring_view;
 #else
+#include "alformatzsv.hpp"
 #include "filesystem.h"
 #include "fmt/base.h"
 #include "fmt/ostream.h"
@@ -1166,7 +1169,7 @@ auto ProcessDefinition(std::string_view inName, unsigned const outRate,
 
         std::array<char,4> startbytes{};
         input->read(startbytes.data(), startbytes.size());
-        if(input->gcount() != startbytes.size() || !input->good())
+        if(std::cmp_not_equal(input->gcount(), startbytes.size()) || !input->good())
         {
             fmt::println(std::cerr, "Error: Could not read input file '{}'", inName);
             return false;
@@ -1261,7 +1264,7 @@ void PrintHelp(const std::string_view argv0, std::ostream &ofile)
 }
 
 // Standard command line dispatch.
-auto main(std::span<std::string_view> args) -> int
+auto main(std::span<al::zstring_view> args) -> int
 {
     if(args.size() < 2)
     {
@@ -1496,7 +1499,7 @@ auto main(std::span<std::string_view> args) -> int
 
 auto main(int argc, char **argv) -> int
 {
-    auto args = std::vector<std::string_view>(gsl::narrow<unsigned int>(argc));
+    auto args = std::vector<al::zstring_view>(gsl::narrow<unsigned>(argc));
     std::copy_n(argv, args.size(), args.begin());
     return main(std::span{args});
 }

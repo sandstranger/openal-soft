@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -32,7 +33,6 @@
 #include "almalloc.h"
 #include "alnumeric.h"
 #include "alstring.h"
-#include "common/alhelpers.hpp"
 #include "opthelpers.h"
 #include "pragmadefs.h"
 #include "zudl.hpp"
@@ -66,9 +66,11 @@ struct SwsContext;
 #include "SDL3/SDL_video.h"
 
 #if HAVE_CXXMODULES
+import alhelpers;
 import fmtlib;
 import gsl;
 import openal;
+import zstring_view;
 
 /* AL_APIENTRY is needed, but not exported from the module. */
 #ifdef _WIN32
@@ -83,6 +85,8 @@ import openal;
 #include "AL/alc.h"
 #include "AL/alext.h"
 
+#include "alformatzsv.hpp"
+#include "common/alhelpers.hpp"
 #include "fmt/base.h"
 #include "fmt/ostream.h"
 #include "gsl/gsl"
@@ -179,24 +183,6 @@ using SwrContextPtr = std::unique_ptr<SwrContext,decltype([](SwrContext *ptr){ s
 
 using SwsContextPtr = std::unique_ptr<SwsContext, decltype([](SwsContext *ptr)
     { sws_freeContext(ptr); })>;
-
-
-[[nodiscard]] constexpr
-auto NextPowerOf2(std::size_t value) noexcept -> std::size_t
-{
-    if(value > 0)
-    {
-        --value;
-        value |= value>>1;
-        value |= value>>2;
-        value |= value>>4;
-        value |= value>>8;
-        value |= value>>16;
-        if constexpr(sizeof(std::size_t) > 4)
-            value |= (value>>16)>>16;
-    }
-    return value+1;
-}
 
 
 struct SDLProps {
@@ -553,7 +539,8 @@ struct MovieState {
 
     std::string mFilename;
 
-    explicit MovieState(std::string_view fname) : mAudio{*this}, mVideo{*this}, mFilename{fname}
+    explicit
+    MovieState(std::string_view const fname) : mAudio{*this}, mVideo{*this}, mFilename{fname}
     { }
     ~MovieState()
     {
@@ -797,7 +784,7 @@ void sample_dup(std::span<uint8_t> out, std::span<const uint8_t> in, size_t coun
 
 auto AudioState::readAudio(std::span<uint8_t> samples, int &sample_skip) -> bool
 {
-    auto audio_size = 0u;
+    auto audio_size = 0_uz;
 
     /* Read the next chunk of data, refill the buffer, and queue it
      * on the source.
@@ -1388,7 +1375,7 @@ void AudioState::handler()
         {
             const auto numsamples = duration_cast<seconds>(mCodecCtx->sample_rate
                 * AudioBufferTotalTime).count();
-            mBufferData.resize(NextPowerOf2(gsl::narrow_cast<size_t>(numsamples) * mFrameSize));
+            mBufferData.resize(std::bit_ceil(gsl::narrow<size_t>(numsamples) * mFrameSize));
             std::ranges::fill(mBufferData, uint8_t{});
 
             mReadCount.store(0, std::memory_order_relaxed);
@@ -2153,9 +2140,9 @@ auto PrettyTime(seconds t) -> std::string
 
 
 struct Application {
-    std::span<std::string_view> mArgs{};
+    std::span<al::zstring_view> mArgs{};
 
-    using ALMgrHandle = std::invoke_result_t<decltype(InitAL), std::span<std::string_view>&,
+    using ALMgrHandle = std::invoke_result_t<decltype(InitAL), std::span<al::zstring_view>&,
         ALCint const*>;
     std::optional<ALMgrHandle> mALManager{};
 
@@ -2171,7 +2158,7 @@ struct Application {
 
     std::unique_ptr<MovieState> mMovieState{};
 
-    explicit Application(std::span<std::string_view> const args) noexcept : mArgs{args} { }
+    explicit Application(std::span<al::zstring_view> const args) noexcept : mArgs{args} { }
     ~Application()
     {
         mMovieState = nullptr;
@@ -2229,7 +2216,7 @@ struct Application {
     }
 };
 
-auto main(std::span<std::string_view> args) -> int
+auto main(std::span<al::zstring_view> args) -> int
 {
     SDL_SetMainReady();
 
@@ -2584,7 +2571,7 @@ auto main(std::span<std::string_view> args) -> int
 
 auto main(int argc, char *argv[]) -> int
 {
-    auto args = std::vector<std::string_view>(gsl::narrow<unsigned int>(argc));
+    auto args = std::vector<al::zstring_view>(gsl::narrow<unsigned>(argc));
     std::ranges::copy(std::views::counted(argv, argc), args.begin());
     return main(std::span{args});
 }

@@ -745,12 +745,15 @@ set(COMMON_HDRS
     common/bitset.hpp
     common/cemath.hpp
     common/comptr.h
+    common/disable_alloc.hpp
     common/dynload.h
     common/dlopennote.h
     common/expected.hpp
     common/filesystem.h
     common/flexarray.h
     common/ghc_filesystem.h
+    common/inout_ptr.hpp
+    common/instance_of.hpp
     common/intrusive_ptr.h
     common/opthelpers.h
     common/pffft.h
@@ -843,6 +846,7 @@ set(CORE_HDRS
     core/cubic_defs.h
     core/cubic_tables.hpp
     core/decoderbase.hpp
+    core/devfmttraits.hpp
     core/devformat.h
     core/device.h
     core/effects/base.h

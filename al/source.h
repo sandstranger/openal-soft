@@ -17,10 +17,10 @@
 #include "AL/al.h"
 #include "AL/alext.h"
 
-#include "almalloc.h"
 #include "altypes.hpp"
 #include "core/context.h"
 #include "core/voice.h"
+#include "disable_alloc.hpp"
 #include "gsl/gsl"
 #include "intrusive_ptr.h"
 
@@ -163,18 +163,18 @@ struct Source {
     Source(const Source&) = delete;
     auto operator=(const Source&) -> Source& = delete;
 
-    static void SetName(gsl::not_null<Context*> context, ALuint id, std::string_view name);
+    static void SetName(al::Context& context, ALuint id, std::string_view name);
 
     DISABLE_ALLOC
 
 #if ALSOFT_EAX
 public:
-    void eaxInitialize(gsl::not_null<Context*> context) noexcept;
+    void eaxInitialize(al::Context& context) noexcept;
     void eaxDispatch(const EaxCall& call) { call.is_get() ? eax_get(call) : eax_set(call); }
     void eaxCommit();
     void eaxMarkAsChanged() noexcept { mEaxChanged = true; }
 
-    static auto EaxLookupSource(gsl::not_null<Context*> al_context LIFETIMEBOUND, ALuint source_id)
+    static auto EaxLookupSource(al::Context& al_context LIFETIMEBOUND, ALuint source_id)
         noexcept -> Source*;
 
 private:
@@ -429,7 +429,7 @@ private:
 
 } /* namespace al */
 
-void UpdateAllSourceProps(gsl::not_null<al::Context*> context);
+void UpdateAllSourceProps(al::Context& context);
 
 struct SourceSubList {
     u64 mFreeMask{~0_u64};

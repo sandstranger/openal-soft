@@ -82,14 +82,17 @@ import cemath;
 import core.context;
 import core.device;
 import cubic_tables;
+import format;
 import types;
 #else
+#include "alformat.hpp"
 #include "altypes.hpp"
 #include "cemath.hpp"
 #include "core/bsinc_tables.hpp"
 #include "core/context.h"
 #include "core/cubic_tables.hpp"
 #include "core/device.h"
+#include "core/devfmttraits.hpp"
 #endif
 
 
@@ -1126,7 +1129,7 @@ auto GetPanGainSelector(VoiceProps const &props) noexcept NONBLOCKING
         case BottomBackRight: return rgain;
         case Aux0: case Aux1: case Aux2: case Aux3: case Aux4: case Aux5: case Aux6: case Aux7:
         case Aux8: case Aux9: case Aux10: case Aux11: case Aux12: case Aux13: case Aux14:
-        case Aux15: case MaxChannels: break;
+        case Aux15: case NumChannels: break;
         }
         return mingain;
     };
@@ -2537,15 +2540,14 @@ void DeviceBase::renderSamples(void *const outBuffer, unsigned const numSamples,
     }
 }
 
-void DeviceBase::doDisconnect(std::string&& msg)
+void DeviceBase::doDisconnect(al::string_view const fmt, al::format_args&& args)
 {
     const auto mixLock = getWriteMixLock();
 
     if(Connected.exchange(false, std::memory_order_acq_rel))
     {
-        auto evt = std::array{AsyncEvent{std::in_place_type<AsyncDisconnectEvent>}};
-        auto &disconnect = std::get<AsyncDisconnectEvent>(evt.front());
-        disconnect.msg = std::move(msg);
+        auto const evt = std::array{AsyncEvent{std::in_place_type<AsyncDisconnectEvent>,
+            al::vformat(fmt, std::move(args))}};
 
         for(auto *ctx : *mContexts.load())
         {

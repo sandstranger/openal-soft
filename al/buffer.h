@@ -12,9 +12,9 @@
 #include "AL/al.h"
 
 #include "alc/inprogext.h"
-#include "almalloc.h"
 #include "altypes.hpp"
 #include "core/buffer_storage.h"
+#include "disable_alloc.hpp"
 #include "gsl/gsl"
 #include "intrusive_ptr.h"
 #include "vector.h"
@@ -70,7 +70,14 @@ struct Buffer : BufferStorage {
         return al::intrusive_ptr{this};
     }
 
-    static void SetName(gsl::not_null<al::Context*> context, ALuint id, std::string_view name);
+    Buffer() = default;
+    Buffer(const Buffer&) = delete;
+    Buffer(Buffer&&) = delete;
+    ~Buffer() = default;
+    auto operator=(const Buffer&) -> Buffer& = delete;
+    auto operator=(Buffer&&) -> Buffer& = delete;
+
+    static void SetName(al::Context& context, ALuint id, std::string_view name);
 
     DISABLE_ALLOC
 

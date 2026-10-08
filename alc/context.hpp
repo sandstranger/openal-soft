@@ -6,6 +6,7 @@
 #include <atomic>
 #include <bitset>
 #include <concepts>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -48,9 +49,9 @@ struct DebugGroup;
 struct EffectSlotSubList;
 struct SourceSubList;
 
-enum class DebugSource : u8::value_t;
-enum class DebugType : u8::value_t;
-enum class DebugSeverity : u8::value_t;
+enum class DebugSource : std::uint8_t;
+enum class DebugType : std::uint8_t;
+enum class DebugSeverity : std::uint8_t;
 
 
 enum ContextFlags {
@@ -371,7 +372,7 @@ using ContextRef = al::intrusive_ptr<al::Context>;
 
 auto GetContextRef() noexcept -> ContextRef;
 
-void UpdateContextProps(al::Context *context);
+void UpdateContextProps(al::Context &context);
 
 namespace al {
 

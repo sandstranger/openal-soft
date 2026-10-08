@@ -105,7 +105,7 @@ auto getContextExtensions() noexcept -> std::vector<std::string_view>
         "AL_SOFT_MSADPCM"sv,
         "AL_SOFT_source_latency"sv,
         "AL_SOFT_source_length"sv,
-        "AL_SOFTX_source_panning"sv,
+        "AL_SOFT_source_panning"sv,
         "AL_SOFT_source_resampler"sv,
         "AL_SOFT_source_spatialize"sv,
         "AL_SOFT_source_start_delay"sv,
@@ -207,7 +207,7 @@ void Context::init()
 {
     if(sDefaultEffect.mType != AL_EFFECT_NULL && mDevice.Type == DeviceType::Playback)
     {
-        mDefaultSlot = std::make_unique<EffectSlot>(gsl::make_not_null(this));
+        mDefaultSlot = std::make_unique<EffectSlot>(*this);
         aluInitEffectPanning(mDefaultSlot->mSlot, this);
     }
 
@@ -319,9 +319,9 @@ void Context::applyAllUpdates()
 #endif
 
     if(std::exchange(mPropsDirty, false))
-        UpdateContextProps(this);
-    UpdateAllEffectSlotProps(gsl::make_not_null(this));
-    UpdateAllSourceProps(gsl::make_not_null(this));
+        UpdateContextProps(*this);
+    UpdateAllEffectSlotProps(*this);
+    UpdateAllSourceProps(*this);
 
     /* Now with all updates declared, let the mixer continue applying them so
      * they all happen at once.
@@ -798,7 +798,7 @@ void Context::eax_dispatch_source(const EaxCall& call)
     const auto source_id = call.get_property_al_name();
     const auto srclock = std::lock_guard{mSourceLock};
 
-    const auto source = Source::EaxLookupSource(gsl::make_not_null(this), source_id);
+    const auto source = Source::EaxLookupSource(*this, source_id);
     if(source == nullptr)
         eax_fail("Source not found.");
 
@@ -888,7 +888,7 @@ void Context::eax_context_commit_macro_fx_factor()
 
 void Context::eax_initialize_fx_slots()
 {
-    mEaxFxSlots.initialize(gsl::make_not_null(this));
+    mEaxFxSlots.initialize(*this);
     mEaxPrimaryFxSlotIndex = mEax.guidPrimaryFXSlotID;
 }
 

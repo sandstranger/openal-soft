@@ -10,9 +10,9 @@
 #include "AL/al.h"
 #include "AL/efx.h"
 
-#include "almalloc.h"
 #include "altypes.hpp"
 #include "core/effects/base.h"
+#include "disable_alloc.hpp"
 #include "effects/effects.h"
 #include "gsl/gsl"
 
@@ -63,16 +63,23 @@ struct Effect {
     /* Self ID */
     ALuint mId{0u};
 
-    static void SetName(gsl::not_null<al::Context*> context, ALuint id, std::string_view name);
+    Effect() = default;
+    Effect(const Effect&) = delete;
+    Effect(Effect&&) = delete;
+    ~Effect() = default;
+    auto operator=(const Effect&) -> Effect& = delete;
+    auto operator=(Effect&&) -> Effect& = delete;
+
+    static void SetName(al::Context& context, ALuint id, std::string_view name);
 
     DISABLE_ALLOC
 };
 
 } /* namespace al */
 
-void InitEffect(al::Effect *effect);
+void InitEffect(al::Effect& effect);
 
-void LoadReverbPreset(std::string_view name, al::Effect *effect);
+void LoadReverbPreset(std::string_view name, al::Effect& effect);
 
 bool IsValidEffectType(ALenum type) noexcept;
 

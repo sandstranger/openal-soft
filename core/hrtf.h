@@ -21,6 +21,7 @@
 
 struct HrtfStore {
     alignas(16) std::atomic<unsigned> mRef;
+    std::u8string mFilename;
 
     unsigned mSampleRate : 24;
     unsigned mIrSize : 8;

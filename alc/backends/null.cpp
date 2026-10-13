@@ -20,7 +20,7 @@
 
 #include "config.h"
 
-#include "null.h"
+#include "null.hpp"
 
 #include <exception>
 #include <atomic>
@@ -28,16 +28,17 @@
 #include <thread>
 
 #include "althrd_setname.h"
-#include "core/helpers.h"
 
 #if HAVE_CXXMODULES
 import backends.exception;
 import core.device;
+import core.helpers;
 import types;
 #else
 #include "alc/backends/exception.hpp"
 #include "altypes.hpp"
 #include "core/device.h"
+#include "core/helpers.hpp"
 #endif
 
 

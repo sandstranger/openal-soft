@@ -20,7 +20,7 @@
 
 #include "config.h"
 
-#include "pipewire.h"
+#include "pipewire.hpp"
 
 #include <algorithm>
 #include <array>
@@ -28,7 +28,6 @@
 #include <cinttypes>
 #include <cmath>
 #include <concepts>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cerrno>
@@ -46,10 +45,7 @@
 #include <utility>
 
 #include "alc/alconfig.h"
-#include "alc/backends/base.h"
 #include "alnumeric.h"
-#include "alstring.h"
-#include "core/helpers.h"
 #include "dlopennote.h"
 #include "dynload.h"
 #include "opthelpers.h"
@@ -132,12 +128,15 @@ constexpr auto PwIdAny = PW_ID_ANY;
 DIAGNOSTIC_POP;
 
 #if HAVE_CXXMODULES
+import alstring;
 import backends.exception;
 import core.device;
+import core.helpers;
 import fmtlib;
 import format;
 import gsl;
 import logging;
+import spanstream;
 import types;
 import zstring_view;
 #else
@@ -145,11 +144,14 @@ import zstring_view;
 #include "alformat.hpp"
 #include "alformattypes.hpp"
 #include "alformatzsv.hpp"
+#include "alstring.h"
 #include "core/device.h"
+#include "core/helpers.hpp"
 #include "core/logging.h"
 #include "fmt/format.h"
 #include "fmt/ranges.h"
 #include "gsl/gsl"
+#include "spanstream.hpp"
 #include "zstring_view.hpp"
 #endif
 
@@ -240,17 +242,21 @@ using std::chrono::nanoseconds;
 auto *gConfigFileName = gsl::czstring{};
 
 
-auto check_version(gsl::czstring const version) -> bool
+auto check_version(al::zstring_view const version) -> bool
 {
     /* There doesn't seem to be a function to get the version as an integer, so
      * instead we have to parse the string, which hopefully won't break in the
      * future.
      */
+    auto verstream = al::ispanstream{version};
     auto major = int{};
+    if((verstream >> major).get() != '.')
+        return false;
     auto minor = int{};
+    if((verstream >> minor).get() != '.')
+        return false;
     auto revision = int{};
-    /* NOLINTNEXTLINE(cert-err34-c,cppcoreguidelines-pro-type-vararg) */
-    if(auto const ret = sscanf(version, "%d.%d.%d", &major, &minor, &revision); ret != 3)
+    if((verstream >> revision).fail())
         return false;
 
     /* client-rt.conf is deprecated since PipeWire 1.3.81, and we should just
@@ -867,6 +873,12 @@ constexpr auto X714Map = std::array{
     SPA_AUDIO_CHANNEL_RL, SPA_AUDIO_CHANNEL_RR, SPA_AUDIO_CHANNEL_SL, SPA_AUDIO_CHANNEL_SR,
     SPA_AUDIO_CHANNEL_TFL, SPA_AUDIO_CHANNEL_TFR, SPA_AUDIO_CHANNEL_TRL, SPA_AUDIO_CHANNEL_TRR
 };
+/* Unpositioned channels, as used by "Pro Audio" profiles. Treated as stereo,
+ * with the stream still using FL and FR like other stereo apps.
+ */
+constexpr auto AuxStereoMap = std::array{
+    SPA_AUDIO_CHANNEL_AUX0, SPA_AUDIO_CHANNEL_AUX1
+};
 
 /**
  * Checks if every channel in 'map1' exists in 'map0' (that is, map0 is equal
@@ -991,7 +1003,8 @@ void DeviceNode::parsePositions(spa_pod const *value, bool const force_update) n
         }
         else if(MatchChannelMap(chanmap, QuadMap))
             mChannels = DevFmtQuad;
-        else if(MatchChannelMap(chanmap, StereoMap))
+        else if(MatchChannelMap(chanmap, StereoMap)
+            || MatchChannelMap(chanmap, AuxStereoMap))
             mChannels = DevFmtStereo;
         else
             mChannels = DevFmtMono;
@@ -2277,7 +2290,7 @@ bool PipeWireBackendFactory::init()
     if(!pwire_load())
         return false;
 
-    auto const version = pw_get_library_version();
+    auto const version = al::zstring_view{pw_get_library_version()};
     if(!check_version(version))
     {
         WARN("PipeWire version \"{}\" too old ({} or newer required)", version,

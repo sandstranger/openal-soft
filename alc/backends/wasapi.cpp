@@ -20,7 +20,7 @@
 
 #include "config.h"
 
-#include "wasapi.h"
+#include "wasapi.hpp"
 
 #include <windows.h>
 
@@ -66,7 +66,6 @@
 
 #include "alc/alconfig.h"
 #include "alnumeric.h"
-#include "alstring.h"
 #include "althrd_setname.h"
 #include "comptr.h"
 #include "core/converter.h"
@@ -103,12 +102,14 @@ DEFINE_PROPERTYKEY(PKEY_AudioEndpoint_GUID, 0x1da5d803, 0xd492, 0x4edd, 0x8c, 0x
 #endif
 
 #if HAVE_CXXMODULES
+import alstring;
 import backends.exception;
 import core.device;
 import format;
 import logging;
 #else
 #include "alc/backends/exception.hpp"
+#include "alstring.h"
 #include "alformat.hpp"
 #include "core/device.h"
 #include "core/logging.h"
@@ -1413,8 +1414,11 @@ FORCE_ALIGN void WasapiPlayback::mixerProc(SpatialDevice const &audio)
                     auto id = decltype(flags){1} << std::countr_zero(flags);
                     flags &= ~id;
 
-                    audio.mRender->ActivateSpatialAudioObject(static_cast<AudioObjectType>(id),
-                        al::out_ptr(channels.emplace_back()));
+                    auto const acthr = audio.mRender->ActivateSpatialAudioObject(
+                        static_cast<AudioObjectType>(id), al::out_ptr(channels.emplace_back()));
+                    if(FAILED(acthr))
+                        ERR("Failed to get spatial audio object for channel {}: {:x}",
+                            channels.size()-1, as_unsigned(acthr));
                 }
                 buffers.resize(channels.size());
                 if(mResampler)
@@ -1498,8 +1502,8 @@ FORCE_ALIGN void WasapiPlayback::mixerProc(SpatialDevice const &audio)
             ERR("Failed to update playback objects: {:#x}", as_unsigned(hr));
     }
     mPadding.store(0u, std::memory_order_release);
-    audio.mRender->Stop();
-    audio.mRender->Reset();
+    std::ignore = audio.mRender->Stop();
+    std::ignore = audio.mRender->Reset();
 }
 
 
@@ -2528,8 +2532,8 @@ void WasapiCapture::recordProc(IAudioClient *client, IAudioCaptureClient *captur
             ERR("WaitForSingleObjectEx error: {:#x}", res);
     }
 
-    client->Stop();
-    client->Reset();
+    std::ignore = client->Stop();
+    std::ignore = client->Reset();
 }
 
 

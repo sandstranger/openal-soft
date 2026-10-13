@@ -4,12 +4,13 @@
 #include "config.h"
 
 #include <atomic>
+#include <concepts>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "AL/al.h"
@@ -103,14 +104,33 @@ struct Device final : ALCdevice, intrusive_ref<Device,DeviceDeleter>, DeviceBase
 
     void enumerateHrtfs();
 
+    [[nodiscard]]
     auto getConfigValueBool(std::string_view const block, std::string_view const key,
         bool const def) const -> bool
     { return GetConfigValueBool(mDeviceName, block, key, def); }
 
-    template<typename T>
-    auto configValue(std::string_view block, std::string_view key) const -> std::optional<T> = delete;
+    template<typename T> [[nodiscard]]
+    auto configValue(std::string_view const block, std::string_view const key) const
+        -> std::optional<T>
+    {
+        if constexpr(std::same_as<T, std::string>)
+            return ConfigValueStr(mDeviceName, block, key);
+        else if constexpr(std::same_as<T, int>)
+            return ConfigValueI32(mDeviceName, block, key);
+        else if constexpr(std::same_as<T, unsigned>)
+            return ConfigValueU32(mDeviceName, block, key);
+        else if constexpr(std::same_as<T, float>)
+            return ConfigValueF32(mDeviceName, block, key);
+        else if constexpr(std::same_as<T, bool>)
+            return ConfigValueBool(mDeviceName, block, key);
+        else
+        {
+            static_assert(dependent_false<T>, "Unexpected config value type");
+            return std::nullopt;
+        }
+    }
 
-    static auto Create(DeviceType type) -> intrusive_ptr<Device>;
+    [[nodiscard]] static auto Create(DeviceType type) -> intrusive_ptr<Device>;
 
     /** Stores the latest ALC device error. */
     static void SetGlobalError(ALCenum const errorCode) { SetError(nullptr, errorCode); }
@@ -130,27 +150,6 @@ private:
 
     friend DeviceDeleter;
 };
-
-template<> inline
-auto Device::configValue(std::string_view const block, std::string_view const key) const
-    -> std::optional<std::string>
-{ return ConfigValueStr(mDeviceName, block, key); }
-template<> inline
-auto Device::configValue(std::string_view const block, std::string_view const key) const
-    -> std::optional<int>
-{ return ConfigValueI32(mDeviceName, block, key); }
-template<> inline
-auto Device::configValue(std::string_view const block, std::string_view const key) const
-    -> std::optional<unsigned>
-{ return ConfigValueU32(mDeviceName, block, key); }
-template<> inline
-auto Device::configValue(std::string_view const block, std::string_view const key) const
-    -> std::optional<float>
-{ return ConfigValueF32(mDeviceName, block, key); }
-template<> inline
-auto Device::configValue(std::string_view const block, std::string_view const key) const
-    -> std::optional<bool>
-{ return ConfigValueBool(mDeviceName, block, key); }
 
 } // namespace al
 

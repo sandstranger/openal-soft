@@ -55,7 +55,7 @@
 #endif
 
 #include "alnumeric.h"
-#include "strutils.hpp"
+#include "envutils.hpp"
 
 #if HAVE_CXXMODULES
 import alstring;
@@ -63,6 +63,7 @@ import core.helpers;
 import filesystem;
 import logging;
 #else
+#include "alformatpath.hpp"
 #include "alstring.h"
 #include "core/helpers.hpp"
 #include "core/logging.h"
@@ -76,8 +77,8 @@ using namespace std::string_view_literals;
 
 auto gSearchLock = std::mutex{};
 
-void DirectorySearch(fs::path const& path, std::u8string_view const ext,
-    std::vector<fs::path> *const results)
+void DirectorySearch(fs::path const& path, fs::path const& ext,
+    std::vector<fs::path>*const results)
 {
     const auto base = results->size();
 
@@ -86,7 +87,7 @@ void DirectorySearch(fs::path const& path, std::u8string_view const ext,
         if(!fs::exists(fpath))
             return;
 
-        TRACE("Searching {} for *{}", al::u8_as_char(fpath.u8string()), al::u8_as_char(ext));
+        TRACE("Searching {} for *{}", fpath, ext);
         for(auto&& dirent : fs::directory_iterator{fpath})
         {
             auto&& entrypath = dirent.path();
@@ -95,7 +96,7 @@ void DirectorySearch(fs::path const& path, std::u8string_view const ext,
 
             if(fs::status(entrypath).type() != fs::file_type::regular)
                 continue;
-            if(is_eq(al::case_compare(entrypath.extension().u8string(), ext)))
+            if(is_eq(al::case_compare(entrypath.extension().native(), ext.native())))
                 results->emplace_back(entrypath);
         }
     }
@@ -106,81 +107,131 @@ void DirectorySearch(fs::path const& path, std::u8string_view const ext,
     const auto newlist = std::span{*results}.subspan(base);
     std::ranges::sort(newlist);
     for(const auto &name : newlist)
-        TRACE(" got {}", al::u8_as_char(name.u8string()));
+        TRACE(" got {}", name);
 }
 
 } // namespace
 
-#ifdef _WIN32
-auto GetProcBinary() -> const PathNamePair&
+auto GetProcBinary() -> fs::path const&
 {
-    static const auto procbin = std::invoke([]() -> PathNamePair
+    static const auto procbin = std::invoke([]() -> fs::path
     {
-        auto res = PathNamePair{};
-
+        auto resultpath = fs::path{};
+#ifdef _WIN32
 #if !ALSOFT_UWP
-        auto pathlen = DWORD{256};
-        auto fullpath = std::wstring(pathlen, L'\0');
-        auto len = GetModuleFileNameW(nullptr, fullpath.data(), pathlen);
-        while(len == fullpath.size())
         {
-            pathlen <<= 1;
-            if(pathlen == 0)
+            auto fullpath = std::wstring{};
+            for(auto pathlen = DWORD{256};pathlen != 0;pathlen <<= 1)
             {
-                /* pathlen overflow (more than 4 billion characters??) */
-                len = 0;
-                break;
+                fullpath.resize(pathlen, L'\0');
+                auto const len = GetModuleFileNameW(nullptr, fullpath.data(), pathlen);
+                if(len < fullpath.size())
+                {
+                    fullpath.resize(len);
+                    resultpath = fullpath;
+                    break;
+                }
             }
-            fullpath.resize(pathlen);
-            len = GetModuleFileNameW(nullptr, fullpath.data(), pathlen);
         }
-        if(len == 0)
+        if(resultpath.empty())
         {
             ERR("Failed to get process name: error {}", GetLastError());
-            return res;
+            return resultpath;
         }
 
-        fullpath.resize(len);
 #else
+
         if(__argc < 1 || !__wargv)
         {
             ERR("Failed to get process name: __argc = {}, __wargv = {}", __argc,
                 static_cast<void*>(__wargv));
-            return res;
+            return resultpath;
         }
         const auto *exePath = __wargv[0];
         if(!exePath)
         {
             ERR("Failed to get process name: __wargv[0] == nullptr");
-            return res;
+            return resultpath;
         }
-        auto fullpath = std::wstring{exePath};
+        resultpath = std::wstring{exePath};
 #endif
-        std::ranges::replace(fullpath, L'/', L'\\');
-
-        if(auto seppos = fullpath.rfind(L'\\'); seppos < fullpath.size())
-        {
-            res.path = wstr_to_utf8(std::wstring_view{fullpath}.substr(0, seppos));
-            res.fname = wstr_to_utf8(std::wstring_view{fullpath}.substr(seppos+1));
-        }
+#endif
+#ifdef __FreeBSD__
+        auto pathlen = size_t{};
+        auto mib = std::array<int,4>{{CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1}};
+        if(sysctl(mib.data(), mib.size(), nullptr, &pathlen, nullptr, 0) == -1)
+            WARN("Failed to sysctl kern.proc.pathname: {}",
+                std::generic_category().message(errno));
         else
-            res.fname = wstr_to_utf8(fullpath);
+        {
+            auto procpath = std::vector<char>(pathlen+1, '\0');
+            sysctl(mib.data(), mib.size(), procpath.data(), &pathlen, nullptr, 0);
+            pathname = procpath.data();
+        }
+#endif
+#ifdef HAVE_PROC_PIDPATH
+        if(resultpath.empty())
+        {
+            auto procpath = std::array<char,PROC_PIDPATHINFO_MAXSIZE>{};
+            const auto pid = getpid();
+            if(proc_pidpath(pid, procpath.data(), procpath.size()) < 1)
+                ERR("proc_pidpath({}, ...) failed: {}", pid,
+                    std::generic_category().message(errno));
+            else
+                resultpath = procpath.data();
+        }
+#endif
+#ifdef __HAIKU__
+        if(resultpath.empty())
+        {
+            auto procpath = std::array<char,PATH_MAX>{};
+            if(find_path(B_APP_IMAGE_SYMBOL, B_FIND_PATH_IMAGE_PATH, NULL, procpath.data(), procpath.size()) == B_OK)
+                resultpath = procpath.data();
+        }
+#endif
+#ifndef __SWITCH__
+        if(resultpath.empty())
+        {
+            constexpr auto SelfLinkNames = std::array{
+                "/proc/self/exe"sv,
+                "/proc/self/file"sv,
+                "/proc/curproc/exe"sv,
+                "/proc/curproc/file"sv,
+            };
 
-        TRACE("Got binary: {}, {}", res.path, res.fname);
-        return res;
+            for(std::string_view const name : SelfLinkNames)
+            {
+                try {
+                    if(auto const path = fs::path{name}; fs::exists(path))
+                    {
+                        resultpath = fs::read_symlink(path);
+                        if(not resultpath.empty())
+                            break;
+                    }
+                }
+                catch(std::exception& e) {
+                    WARN("Exception getting symlink {}: {}", name, e.what());
+                }
+            }
+        }
+#endif
+
+        resultpath.make_preferred();
+        TRACE(R"(Got binary: "{}", "{}")", resultpath.parent_path(), resultpath.filename());
+        return resultpath;
     });
     return procbin;
 }
 
-namespace {
 
+#ifdef _WIN32
 #if !ALSOFT_UWP && !defined(_GAMING_XBOX)
+namespace {
 struct CoTaskMemDeleter {
     void operator()(void *mem) const { CoTaskMemFree(mem); }
 };
-#endif
-
 } // namespace
+#endif
 
 auto SearchDataFiles(fs::path const& ext) -> std::vector<fs::path>
 {
@@ -189,9 +240,9 @@ auto SearchDataFiles(fs::path const& ext) -> std::vector<fs::path>
     /* Search the app-local directory. */
     auto results = std::vector<fs::path>{};
     if(auto localpath = al::getenv(L"ALSOFT_LOCAL_PATH"))
-        DirectorySearch(*localpath, ext.u8string(), &results);
+        DirectorySearch(*localpath, ext, &results);
     else if(auto curpath = fs::current_path(); !curpath.empty())
-        DirectorySearch(curpath, ext.u8string(), &results);
+        DirectorySearch(curpath, ext, &results);
 
     return results;
 }
@@ -204,12 +255,11 @@ auto SearchDataFiles(fs::path const& ext, fs::path const& subdir) -> std::vector
     auto results = std::vector<fs::path>{};
     if(subdir.is_absolute())
     {
-        DirectorySearch(subdir, ext.u8string(), &results);
+        DirectorySearch(subdir, ext, &results);
         return results;
     }
 
 #if !ALSOFT_UWP && !defined(_GAMING_XBOX)
-    auto const extstr = ext.u8string();
     /* Search the local and global data dirs. */
     for(const auto &folderid : std::array{FOLDERID_RoamingAppData, FOLDERID_ProgramData})
     {
@@ -219,7 +269,7 @@ auto SearchDataFiles(fs::path const& ext, fs::path const& subdir) -> std::vector
         if(FAILED(hr) || !buffer || !*buffer)
             continue;
 
-        DirectorySearch(fs::path{buffer.get()}/subdir, extstr, &results);
+        DirectorySearch(fs::path{buffer.get()}/subdir, ext, &results);
     }
 #endif
 
@@ -239,87 +289,6 @@ void SetRTPriority()
 
 #else
 
-auto GetProcBinary() -> const PathNamePair&
-{
-    static const auto procbin = std::invoke([]() -> PathNamePair
-    {
-        auto pathname = std::string{};
-#ifdef __FreeBSD__
-        auto pathlen = size_t{};
-        auto mib = std::array<int,4>{{CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1}};
-        if(sysctl(mib.data(), mib.size(), nullptr, &pathlen, nullptr, 0) == -1)
-            WARN("Failed to sysctl kern.proc.pathname: {}",
-                std::generic_category().message(errno));
-        else
-        {
-            auto procpath = std::vector<char>(pathlen+1, '\0');
-            sysctl(mib.data(), mib.size(), procpath.data(), &pathlen, nullptr, 0);
-            pathname = procpath.data();
-        }
-#endif
-#ifdef HAVE_PROC_PIDPATH
-        if(pathname.empty())
-        {
-            auto procpath = std::array<char,PROC_PIDPATHINFO_MAXSIZE>{};
-            const auto pid = getpid();
-            if(proc_pidpath(pid, procpath.data(), procpath.size()) < 1)
-                ERR("proc_pidpath({}, ...) failed: {}", pid,
-                    std::generic_category().message(errno));
-            else
-                pathname = procpath.data();
-        }
-#endif
-#ifdef __HAIKU__
-        if(pathname.empty())
-        {
-            auto procpath = std::array<char,PATH_MAX>{};
-            if(find_path(B_APP_IMAGE_SYMBOL, B_FIND_PATH_IMAGE_PATH, NULL, procpath.data(), procpath.size()) == B_OK)
-                pathname = procpath.data();
-        }
-#endif
-#ifndef __SWITCH__
-        if(pathname.empty())
-        {
-            constexpr auto SelfLinkNames = std::array{
-                "/proc/self/exe"sv,
-                "/proc/self/file"sv,
-                "/proc/curproc/exe"sv,
-                "/proc/curproc/file"sv,
-            };
-
-            for(const std::string_view name : SelfLinkNames)
-            {
-                try {
-                    if(!fs::exists(name))
-                        continue;
-                    if(auto path = fs::read_symlink(name); !path.empty())
-                    {
-                        pathname = al::u8_as_char(path.u8string());
-                        break;
-                    }
-                }
-                catch(std::exception& e) {
-                    WARN("Exception getting symlink {}: {}", name, e.what());
-                }
-            }
-        }
-#endif
-
-        auto res = PathNamePair{};
-        if(const auto seppos = pathname.rfind('/'); seppos < pathname.size())
-        {
-            res.path = std::string_view{pathname}.substr(0, seppos);
-            res.fname = std::string_view{pathname}.substr(seppos+1);
-        }
-        else
-            res.fname = pathname;
-
-        TRACE(R"(Got binary: "{}", "{}")", res.path, res.fname);
-        return res;
-    });
-    return procbin;
-}
-
 auto SearchDataFiles(fs::path const& ext) -> std::vector<fs::path>
 {
     const auto srchlock = std::lock_guard{gSearchLock};
@@ -327,9 +296,9 @@ auto SearchDataFiles(fs::path const& ext) -> std::vector<fs::path>
     /* Search the app-local directory. */
     auto results = std::vector<fs::path>{};
     if(auto const localpath = al::getenv("ALSOFT_LOCAL_PATH"))
-        DirectorySearch(*localpath, ext.u8string(), &results);
+        DirectorySearch(*localpath, ext, &results);
     else if(auto const curpath = fs::current_path(); !curpath.empty())
-        DirectorySearch(curpath, ext.u8string(), &results);
+        DirectorySearch(curpath, ext, &results);
 
     return results;
 }
@@ -341,16 +310,15 @@ auto SearchDataFiles(fs::path const& ext, fs::path const& subdir) -> std::vector
     auto results = std::vector<fs::path>{};
     if(subdir.is_absolute())
     {
-        DirectorySearch(subdir, ext.u8string(), &results);
+        DirectorySearch(subdir, ext, &results);
         return results;
     }
 
-    auto const extstr = ext.u8string();
     /* Search local data dir */
     if(auto const datapath = al::getenv("XDG_DATA_HOME"))
-        DirectorySearch(fs::path{*datapath}/subdir, extstr, &results);
+        DirectorySearch(fs::path{*datapath}/subdir, ext, &results);
     else if(auto const homepath = al::getenv("HOME"))
-        DirectorySearch(fs::path{*homepath}/".local/share"/subdir, extstr, &results);
+        DirectorySearch(fs::path{*homepath}/".local/share"/subdir, ext, &results);
 
     /* Search global data dirs */
     const auto datadirs = std::string{al::getenv("XDG_DATA_DIRS")
@@ -367,13 +335,13 @@ auto SearchDataFiles(fs::path const& ext, fs::path const& subdir) -> std::vector
         curpos = nextpos;
 
         if(!pathname.empty())
-            DirectorySearch(fs::path{pathname}/subdir, extstr, &results);
+            DirectorySearch(fs::path{pathname}/subdir, ext, &results);
     }
 
 #ifdef ALSOFT_INSTALL_DATADIR
     /* Search the installation data directory */
     if(auto instpath = fs::path{ALSOFT_INSTALL_DATADIR}; !instpath.empty())
-        DirectorySearch(instpath/subdir, extstr, &results);
+        DirectorySearch(instpath/subdir, ext, &results);
 #endif
 
     return results;

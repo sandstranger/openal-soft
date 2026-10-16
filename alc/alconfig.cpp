@@ -45,8 +45,8 @@
 #include <vector>
 
 #include "alnumeric.h"
+#include "envutils.hpp"
 #include "inout_ptr.hpp"
-#include "strutils.hpp"
 
 #if ALSOFT_UWP
 #include <winrt/Windows.Media.Core.h> // !!This is important!!
@@ -64,6 +64,7 @@ import fmtlib;
 import gsl;
 import logging;
 #else
+#include "alformatpath.hpp"
 #include "alstring.h"
 #include "core/helpers.hpp"
 #include "core/logging.h"
@@ -408,18 +409,18 @@ void ReadALConfig()
             path = fs::path{buffer};
             path /= L"alsoft.ini";
 
-            TRACE("Loading config {}...", al::u8_as_char(path.u8string()));
+            TRACE("Loading config {}...", path);
             if(auto f = fs::ifstream{path}; f.is_open())
                 LoadConfigFromFile(f);
         }
     }
 #endif
 
-    path = fs::path(al::char_as_u8(GetProcBinary().path));
+    path = GetProcBinary().parent_path();
     if(!path.empty())
     {
         path /= L"alsoft.ini";
-        TRACE("Loading config {}...", al::u8_as_char(path.u8string()));
+        TRACE("Loading config {}...", path);
         if(auto f = fs::ifstream{path}; f.is_open())
             LoadConfigFromFile(f);
     }
@@ -427,7 +428,7 @@ void ReadALConfig()
     if(auto confpath = al::getenv(L"ALSOFT_CONF"))
     {
         path = *confpath;
-        TRACE("Loading config {}...", al::u8_as_char(path.u8string()));
+        TRACE("Loading config {}...", path);
         if(auto f = fs::ifstream{path}; f.is_open())
             LoadConfigFromFile(f);
     }
@@ -439,7 +440,7 @@ void ReadALConfig()
 {
     auto path = fs::path{"/etc/openal/alsoft.conf"};
 
-    TRACE("Loading config {}...", al::u8_as_char(path.u8string()));
+    TRACE("Loading config {}...", path);
     if(auto f = fs::ifstream{path}; f.is_open())
         LoadConfigFromFile(f);
 
@@ -464,12 +465,12 @@ void ReadALConfig()
         }
 
         if(!path.is_absolute())
-            WARN("Ignoring XDG config dir: {}", al::u8_as_char(path.u8string()));
+            WARN("Ignoring XDG config dir: {}", path);
         else
         {
             path /= "alsoft.conf";
 
-            TRACE("Loading config {}...", al::u8_as_char(path.u8string()));
+            TRACE("Loading config {}...", path);
             if(auto f = fs::ifstream{path}; f.is_open())
                 LoadConfigFromFile(f);
         }
@@ -496,7 +497,7 @@ void ReadALConfig()
         path = *homedir;
         path /= ".alsoftrc";
 
-        TRACE("Loading config {}...", al::u8_as_char(path.u8string()));
+        TRACE("Loading config {}...", path);
         if(auto f = fs::ifstream{path}; f.is_open())
             LoadConfigFromFile(f);
     }
@@ -517,17 +518,17 @@ void ReadALConfig()
     }
     if(!path.empty())
     {
-        TRACE("Loading config {}...", al::u8_as_char(path.u8string()));
+        TRACE("Loading config {}...", path);
         if(auto f = fs::ifstream{path}; f.is_open())
             LoadConfigFromFile(f);
     }
 
-    path = GetProcBinary().path;
+    path = GetProcBinary().parent_path();
     if(!path.empty())
     {
         path /= "alsoft.conf";
 
-        TRACE("Loading config {}...", al::u8_as_char(path.u8string()));
+        TRACE("Loading config {}...", path);
         if(auto f = fs::ifstream{path}; f.is_open())
             LoadConfigFromFile(f);
     }

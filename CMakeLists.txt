@@ -722,13 +722,14 @@ set(COMMON_MODS )
 set(COMMON_SRCS
     common/alcomplex.cpp
     common/almalloc.cpp
+    common/alstring.cpp
     common/althrd_setname.cpp
     common/altypes.cpp
     common/dynload.cpp
+    common/envutils.cpp
     common/filesystem.cpp
     common/pffft.cpp
     common/polyphase_resampler.cpp
-    common/strutils.cpp
 )
 set(COMMON_HDRS
     common/albit.h
@@ -747,6 +748,7 @@ set(COMMON_HDRS
     common/disable_alloc.hpp
     common/dynload.h
     common/dlopennote.h
+    common/envutils.hpp
     common/expected.hpp
     common/filesystem.h
     common/flexarray.h
@@ -760,7 +762,6 @@ set(COMMON_HDRS
     common/pragmadefs.h
     common/ringbuffer.h
     common/spanstream.hpp
-    common/strutils.hpp
     common/vecmat.h
     common/vector.h
     common/zstring_view.hpp
@@ -792,6 +793,7 @@ if(HAVE_CXXMODULES)
     )
 else()
     list(APPEND COMMON_HDRS
+        common/alformatpath.hpp
         common/alformattypes.hpp
         common/alformatzsv.hpp
         common/hann_window.hpp

@@ -65,7 +65,6 @@
 #include <vector>
 
 #include "alc/alconfig.h"
-#include "alnumeric.h"
 #include "althrd_setname.h"
 #include "comptr.h"
 #include "core/converter.h"
@@ -106,12 +105,14 @@ import backends.exception;
 import core.device;
 import format;
 import logging;
+import numeric;
 #else
 #include "alc/backends/exception.hpp"
 #include "alstring.h"
 #include "alformat.hpp"
 #include "core/device.h"
 #include "core/logging.h"
+#include "numeric.hpp"
 #endif
 
 namespace {
@@ -1636,13 +1637,13 @@ auto WasapiPlayback::openProxy(std::string_view const name, DeviceHelper const &
         auto const devlock = DeviceListLock{gDeviceList};
         auto const list = std::span{devlock.getPlaybackList()};
         auto iter = std::ranges::find_if(list, [name](const DevMap &entry) -> bool
-        { return entry.name == name or is_eq(al::ci_compare(entry.endpoint_guid, name)); });
+        { return entry.name == name or al::ci_equal(entry.endpoint_guid, name); });
 
         if(iter == list.end())
         {
             const auto wname = utf8_to_wstr(name);
             iter = std::ranges::find_if(list, [&wname](const DevMap &entry) -> bool
-            { return is_eq(al::ci_compare(entry.devid, wname)); });
+            { return al::ci_equal(entry.devid, wname); });
         }
         if(iter == list.end())
         {
@@ -2668,13 +2669,13 @@ auto WasapiCapture::openProxy(std::string_view const name, DeviceHelper const &h
         auto const devlock = DeviceListLock{gDeviceList};
         auto const devlist = std::span{devlock.getCaptureList()};
         auto iter = std::ranges::find_if(devlist, [name](const DevMap &entry) -> bool
-        { return entry.name == name or is_eq(al::ci_compare(entry.endpoint_guid, name)); });
+        { return entry.name == name or al::ci_equal(entry.endpoint_guid, name); });
 
         if(iter == devlist.end())
         {
             const auto wname = utf8_to_wstr(name);
             iter = std::ranges::find_if(devlist, [&wname](const DevMap &entry) -> bool
-                { return is_eq(al::ci_compare(entry.devid, wname)); });
+                { return al::ci_equal(entry.devid, wname); });
         }
         if(iter == devlist.end())
         {

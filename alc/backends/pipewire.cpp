@@ -25,10 +25,11 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <cinttypes>
+#include <bit>
 #include <cmath>
 #include <concepts>
 #include <cstdlib>
+#include <cstdint>
 #include <cstring>
 #include <cerrno>
 #include <chrono>
@@ -45,7 +46,6 @@
 #include <utility>
 
 #include "alc/alconfig.h"
-#include "alnumeric.h"
 #include "dlopennote.h"
 #include "dynload.h"
 #include "opthelpers.h"
@@ -137,13 +137,12 @@ import fmtlib;
 import format;
 import gsl;
 import logging;
+import numeric;
 import spanstream;
-import types;
 import zstring_view;
 #else
 #include "alc/backends/exception.hpp"
 #include "alformat.hpp"
-#include "alformattypes.hpp"
 #include "alformatzsv.hpp"
 #include "alstring.h"
 #include "core/device.h"
@@ -153,6 +152,7 @@ import zstring_view;
 #include "fmt/format.h"
 #include "fmt/ranges.h"
 #include "gsl/gsl"
+#include "numeric.hpp"
 #include "spanstream.hpp"
 #include "zstring_view.hpp"
 #endif
@@ -615,7 +615,7 @@ constexpr auto InvalidChannelConfig = gsl::narrow<DevFmtChannels>(255);
 struct DeviceNode {
     uint32_t mId{};
 
-    u64 mSerial{};
+    std::uint64_t mSerial{};
     std::string mName;
     std::string mDevName;
 
@@ -1070,12 +1070,12 @@ void NodeProxy::infoCallback(void*, const pw_node_info *info) noexcept
         const auto className = std::string_view{media_class};
 
         auto ntype = NodeType{};
-        if(is_eq(al::ci_compare(className, GetAudioSinkClassName())))
+        if(al::ci_equal(className, GetAudioSinkClassName()))
             ntype = NodeType::Sink;
-        else if(is_eq(al::ci_compare(className, GetAudioSourceClassName()))
-            or is_eq(al::ci_compare(className, GetAudioSourceVirtualClassName())))
+        else if(al::ci_equal(className, GetAudioSourceClassName())
+            or al::ci_equal(className, GetAudioSourceVirtualClassName()))
             ntype = NodeType::Source;
-        else if(is_eq(al::ci_compare(className, GetAudioDuplexClassName())))
+        else if(al::ci_equal(className, GetAudioDuplexClassName()))
             ntype = NodeType::Duplex;
         else
         {
@@ -1089,7 +1089,7 @@ void NodeProxy::infoCallback(void*, const pw_node_info *info) noexcept
         if(!nodeName || !*nodeName) nodeName = spa_dict_lookup(info->props, PW_KEY_NODE_NICK);
         if(!nodeName || !*nodeName) nodeName = devName;
 
-        auto serial_id = u64{info->id};
+        auto serial_id = std::uint64_t{info->id};
 #ifdef PW_KEY_OBJECT_SERIAL
         if(auto *serial_str = spa_dict_lookup(info->props, PW_KEY_OBJECT_SERIAL))
         {
@@ -1164,8 +1164,8 @@ void NodeProxy::infoCallback(void*, const pw_node_info *info) noexcept
         }
         node.mDevName = devName ? devName : "";
         node.mType = ntype;
-        node.mIsHeadphones = form_factor and (is_eq(al::ci_compare(form_factor, "headphones"sv))
-            or is_eq(al::ci_compare(form_factor, "headset"sv)));
+        node.mIsHeadphones = form_factor and (al::ci_equal(form_factor, "headphones"sv)
+            or al::ci_equal(form_factor, "headset"sv));
 
         if(notifyAdd)
         {
@@ -1378,10 +1378,10 @@ void EventManager::addCallback(uint32_t const id, uint32_t, gsl::czstring const 
         const auto className = std::string_view{media_class};
 
         /* Specifically, audio sinks and sources (and duplexes). */
-        const auto isGood = is_eq(al::ci_compare(className, GetAudioSinkClassName()))
-            or is_eq(al::ci_compare(className, GetAudioSourceClassName()))
-            or is_eq(al::ci_compare(className, GetAudioSourceVirtualClassName()))
-            or is_eq(al::ci_compare(className, GetAudioDuplexClassName()));
+        const auto isGood = al::ci_equal(className, GetAudioSinkClassName())
+            or al::ci_equal(className, GetAudioSourceClassName())
+            or al::ci_equal(className, GetAudioSourceVirtualClassName())
+            or al::ci_equal(className, GetAudioDuplexClassName());
         if(!isGood)
         {
             if(!al::contains(className, "/Video"sv) && !className.starts_with("Stream/"sv))
@@ -1520,7 +1520,7 @@ auto make_spa_info(DeviceBase &device, bool const is51rear, use_f32p_e const use
 }
 
 class PipeWirePlayback final : public BackendBase {
-    u64 mTargetId{PwIdAny};
+    std::uint64_t mTargetId{PwIdAny};
     nanoseconds mTimeBase{0};
     ThreadMainloop mLoop;
     PwContextPtr mContext;
@@ -1618,7 +1618,7 @@ void PipeWirePlayback::open(std::string_view name)
 {
     static auto OpenCount = std::atomic{0u};
 
-    auto targetid = u64{PwIdAny};
+    auto targetid = std::uint64_t{PwIdAny};
     auto devname = std::string{};
     gEventHandler.waitForInit();
     if(name.empty())
@@ -1728,7 +1728,7 @@ auto PipeWirePlayback::reset() -> bool
                  * be scaled to 470 samples, which gets rounded down to 256
                  * when 512 would be closer to the requested size.
                  */
-                if(scale < 0.75 && std::popcount(mDevice.mUpdateSize) == 1)
+                if(scale < 0.75 && std::has_single_bit(mDevice.mUpdateSize))
                 {
                     const auto updatesize = std::round(mDevice.mUpdateSize * scale);
                     const auto buffersize = std::round(mDevice.mBufferSize * scale);
@@ -1778,9 +1778,9 @@ auto PipeWirePlayback::reset() -> bool
         mDevice.mSampleRate);
     pw_properties_setf(props, PW_KEY_NODE_RATE, "1/%u", mDevice.mSampleRate);
 #ifdef PW_KEY_TARGET_OBJECT
-    pw_properties_set(props, PW_KEY_TARGET_OBJECT, std::to_string(mTargetId.c_val).c_str());
+    pw_properties_set(props, PW_KEY_TARGET_OBJECT, std::to_string(mTargetId).c_str());
 #else
-    pw_properties_set(props, PW_KEY_NODE_TARGET, std::to_string(mTargetId.c_val).c_str());
+    pw_properties_set(props, PW_KEY_NODE_TARGET, std::to_string(mTargetId).c_str());
 #endif
 
     auto plock = MainloopUniqueLock{mLoop};
@@ -2019,7 +2019,7 @@ auto PipeWirePlayback::getClockLatency() -> ClockLatency
 
 
 class PipeWireCapture final : public BackendBase {
-    u64 mTargetId{PwIdAny};
+    std::uint64_t mTargetId{PwIdAny};
     ThreadMainloop mLoop;
     PwContextPtr mContext;
     PwCorePtr mCore;
@@ -2067,7 +2067,7 @@ void PipeWireCapture::open(std::string_view name)
 {
     static auto OpenCount = std::atomic{0u};
 
-    auto targetid = u64{PwIdAny};
+    auto targetid = std::uint64_t{PwIdAny};
     auto devname = std::string{};
     gEventHandler.waitForInit();
     if(name.empty())
@@ -2198,9 +2198,9 @@ void PipeWireCapture::open(std::string_view name)
         mDevice.mSampleRate);
     pw_properties_setf(props, PW_KEY_NODE_RATE, "1/%u", mDevice.mSampleRate);
 #ifdef PW_KEY_TARGET_OBJECT
-    pw_properties_set(props, PW_KEY_TARGET_OBJECT, std::to_string(mTargetId.c_val).c_str());
+    pw_properties_set(props, PW_KEY_TARGET_OBJECT, std::to_string(mTargetId).c_str());
 #else
-    pw_properties_set(props, PW_KEY_NODE_TARGET, std::to_string(mTargetId.c_val).c_str());
+    pw_properties_set(props, PW_KEY_NODE_TARGET, std::to_string(mTargetId).c_str());
 #endif
 
     auto plock = MainloopUniqueLock{mLoop};

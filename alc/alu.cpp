@@ -28,6 +28,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <iterator>
@@ -41,7 +42,6 @@
 #include <utility>
 #include <variant>
 
-#include "alnumeric.h"
 #include "atomic.h"
 #include "core/ambidefs.h"
 #include "core/async_event.h"
@@ -84,11 +84,10 @@ import core.device;
 import cubic_tables;
 import format;
 import hrtfstore;
-import types;
+import numeric;
 #else
 #include "alformat.hpp"
 #include "alstring.h"
-#include "altypes.hpp"
 #include "cemath.hpp"
 #include "core/bsinc_tables.hpp"
 #include "core/context.h"
@@ -96,6 +95,7 @@ import types;
 #include "core/device.h"
 #include "core/devfmttraits.hpp"
 #include "core/hrtfstore.hpp"
+#include "numeric.hpp"
 #endif
 
 
@@ -112,7 +112,7 @@ auto InitConeScale() noexcept -> float
     auto ret = 1.0f;
     if(auto const optval = al::getenv("__ALSOFT_HALF_ANGLE_CONES"))
     {
-        if(is_eq(al::ci_compare(*optval, "true"sv)) or strtol(optval->c_str(), nullptr, 0) == 1)
+        if(al::ci_equal(*optval, "true"sv) or strtol(optval->c_str(), nullptr, 0) == 1)
             ret *= 0.5f;
     }
     return ret;
@@ -165,7 +165,7 @@ void BsincPrepare(unsigned const increment, BsincState *const state, BSincTable 
         sf = float{MixerFracOne}/static_cast<float>(increment) - table->scaleBase;
         sf = std::max(0.0f, float{BSincScaleCount}*sf*table->scaleRange - 1.0f);
 
-        si = float2uint(sf);
+        si = al::saturating_cast<std::size_t>(sf);
         sf -= static_cast<float>(si);
         /* The interpolation factor is fit to this diagonally-symmetric curve
          * to reduce the transition ripple caused by interpolating different
@@ -809,32 +809,33 @@ auto constexpr RotatorCoeffArray = RotatorCoeffs{};
 
 namespace rotator {
 
+    using ssize_t = std::make_signed_t<std::size_t>;
     [[nodiscard]] constexpr
-    auto P(isize const i, isize const l, isize const a, isize const n, usize const last_base,
-        AmbiRotateMatrix const &R) noexcept -> float
+    auto P(ssize_t const i, ssize_t const l, ssize_t const a, ssize_t const n,
+        std::size_t const last_base, AmbiRotateMatrix const &R) noexcept -> float
     {
-        auto const ip2 = (i+2).reinterpret_as<usize>().c_val;
+        auto const ip2 = as_unsigned(i+2);
         auto const ri1 =  R[ 1+2][ip2];
         auto const rim1 = R[-1+2][ip2];
         auto const ri0 =  R[ 0+2][ip2];
 
-        auto const lm1 = (l-1).reinterpret_as<usize>().c_val;
-        auto const x = (last_base + lm1 + a.reinterpret_as<usize>()).c_val;
+        auto const lm1 = as_unsigned(l-1);
+        auto const x = last_base + lm1 + as_unsigned(a);
         if(n == -l)
-            return ri1*R[last_base.c_val][x] + rim1*R[last_base.c_val + lm1*2][x];
+            return ri1*R[last_base][x] + rim1*R[last_base + lm1*2][x];
         if(n == l)
-            return ri1*R[last_base.c_val + lm1*2][x] - rim1*R[last_base.c_val][x];
-        return ri0*R[(last_base + lm1 + n.reinterpret_as<usize>()).c_val][x];
+            return ri1*R[last_base + lm1*2][x] - rim1*R[last_base][x];
+        return ri0*R[last_base + lm1 + as_unsigned(n)][x];
     }
 
     [[nodiscard]] constexpr
-    auto U(isize const l, isize const m, isize const n, usize const last_base,
+    auto U(ssize_t const l, ssize_t const m, ssize_t const n, std::size_t const last_base,
         AmbiRotateMatrix const &R) noexcept -> float
     {
         return P(0, l, m, n, last_base, R);
     }
     [[nodiscard]] constexpr
-    auto V(isize const l, isize const m, isize const n, usize const last_base,
+    auto V(ssize_t const l, ssize_t const m, ssize_t const n, std::size_t const last_base,
         AmbiRotateMatrix const &R) noexcept -> float
     {
         using namespace std::numbers;
@@ -851,7 +852,7 @@ namespace rotator {
         return d ? p1*sqrt2_v<float> : (p0 + p1);
     }
     [[nodiscard]] constexpr
-    auto W(isize const l, isize const m, isize const n, usize const last_base,
+    auto W(ssize_t const l, ssize_t const m, ssize_t const n, std::size_t const last_base,
         AmbiRotateMatrix const &R) noexcept -> float
     {
         Expects(m != 0);
@@ -882,7 +883,7 @@ void AmbiRotator(AmbiRotateMatrix &matrix, int const order) noexcept NONBLOCKING
     auto coeffs = RotatorCoeffArray.cbegin();
     auto base_idx = 4_uz;
     auto last_base = 1_uz;
-    for(auto const l : std::views::iota(2_isize, isize{order}+1))
+    for(auto const l : std::views::iota(2_z, order+1))
     {
         auto y = base_idx;
         for(auto const n : std::views::iota(-l, l+1))
@@ -907,7 +908,7 @@ void AmbiRotator(AmbiRotateMatrix &matrix, int const order) noexcept NONBLOCKING
             ++y;
         }
         last_base = base_idx;
-        base_idx += (l*2 + 1).reinterpret_as<usize>().c_val;
+        base_idx += as_unsigned(l*2 + 1);
     }
 }
 /* End ambisonic rotation helpers. */
@@ -2359,31 +2360,21 @@ void ApplyDither(std::span<FloatBufferLine> const Samples, unsigned *const dithe
 template<typename T> [[nodiscard]] constexpr
 auto SampleConv(float const val) noexcept -> T
 {
-    if constexpr(std::same_as<T, f32>)
-        return f32{val};
-    else if constexpr(std::same_as<T, i32>)
-    {
-        /* Floats have a 23-bit mantissa, plus an implied 1 bit and a sign bit.
-         * This means a normalized float has at most 25 bits of signed precision.
-         * When scaling and clamping for a signed 32-bit integer, these following
-         * values are the best a float can give.
-         */
-        return i32{fastf2i(std::clamp(val*2147483648.0f, -2147483648.0f, 2147483520.0f))};
-    }
-    else if constexpr(std::same_as<T, i16>)
-    {
-        auto const tmp = std::clamp(val*32768.0f, -32768.0f, 32767.0f);
-        return i16{gsl::narrow_cast<i16::value_t>(fastf2i(tmp))};
-    }
-    else if constexpr(std::same_as<T, i8>)
-        return i8{gsl::narrow_cast<i8::value_t>(fastf2i(std::clamp(val*128.0f, -128.0f, 127.0f)))};
+    if constexpr(std::same_as<T, float>)
+        return val;
+    else if constexpr(std::same_as<T, std::int32_t>)
+        return al::saturating_cast<std::int32_t>(val*2147483648.0f);
+    else if constexpr(std::same_as<T, std::int16_t>)
+        return al::saturating_cast<std::int16_t>(val*32768.0f);
+    else if constexpr(std::same_as<T, std::int8_t>)
+        return al::saturating_cast<std::int8_t>(val*128.0f);
     /* Unsigned output variations use the signed conversions with an offset. */
-    else if constexpr(std::same_as<T, u32>)
-        return SampleConv<i32>(val).reinterpret_as<u32>() + 2147483648_u32;
-    else if constexpr(std::same_as<T, u16>)
-        return SampleConv<i16>(val).reinterpret_as<u16>() + 32768_u16;
-    else if constexpr(std::same_as<T, u8>)
-        return SampleConv<i8>(val).reinterpret_as<u8>() + 128_u8;
+    else if constexpr(std::same_as<T, std::uint32_t>)
+        return static_cast<std::uint32_t>(SampleConv<std::int32_t>(val)) + 2147483648u;
+    else if constexpr(std::same_as<T, std::uint16_t>)
+        return gsl::narrow_cast<std::uint16_t>(SampleConv<std::int16_t>(val) + 32768);
+    else if constexpr(std::same_as<T, std::uint8_t>)
+        return gsl::narrow_cast<std::uint8_t>(SampleConv<std::int8_t>(val) + 128);
     else
     {
         static_assert(al::dependent_false<T>, "Unexpected sample type");

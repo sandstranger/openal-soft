@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -32,7 +33,6 @@
 #include <variant>
 
 #include "alc/effects/base.h"
-#include "alnumeric.h"
 #include "core/ambidefs.h"
 #include "core/bufferline.h"
 #include "core/effects/base.h"
@@ -46,10 +46,12 @@
 
 #if HAVE_CXXMODULES
 import core.device;
+import numeric;
 import window.hann;
 #else
 #include "core/device.h"
 #include "hann_window.hpp"
+#include "numeric.hpp"
 #endif
 
 struct BufferStorage;
@@ -293,7 +295,7 @@ void PshifterState::process(const size_t samplesToDo,
                      * account for oversampling.
                      */
                     tmp *= std::numbers::inv_pi_v<float>;
-                    auto const qpd = float2int(tmp);
+                    auto const qpd = al::saturating_cast<int>(tmp);
                     tmp -= static_cast<float>(qpd + (qpd%2));
                     tmp *= float{0.5f*OversampleFactor};
 
@@ -349,7 +351,7 @@ void PshifterState::process(const size_t samplesToDo,
                      * lose precision, producing less exact phase over time.
                      */
                     tmp = (tmp+mSumPhase[k]) * std::numbers::inv_pi_v<float>;
-                    auto const qpd = float2int(tmp);
+                    auto const qpd = al::saturating_cast<int>(tmp);
                     tmp -= static_cast<float>(qpd + (qpd%2));
                     mSumPhase[k] = tmp * std::numbers::pi_v<float>;
 
@@ -399,7 +401,7 @@ void PshifterState::process(const size_t samplesToDo,
 
                     /* Wrap between -pi and +pi for the sum. */
                     tmp *= std::numbers::inv_pi_v<float>;
-                    auto const qpd = float2int(tmp);
+                    auto const qpd = al::saturating_cast<int>(tmp);
                     tmp -= static_cast<float>(qpd + (qpd%2));
                     auto const phase = tmp * std::numbers::pi_v<float>;
 

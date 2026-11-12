@@ -1,6 +1,7 @@
 #ifndef INOUT_PTR_HPP
 #define INOUT_PTR_HPP
 
+#include <functional>
 #include <memory>
 #include <tuple>
 #include <type_traits>
@@ -89,14 +90,12 @@ public:
     out_ptr_t(const out_ptr_t&) = delete;
     out_ptr_t& operator=(const out_ptr_t&) = delete;
 
-    explicit(false) constexpr /* NOLINTNEXTLINE(google-explicit-constructor) */
+    explicit(false) constexpr /* NOLINTNEXTLINE(*-explicit-constructor) */
     operator PT*() && noexcept { return std::addressof(mPtr); }
 
-    explicit(false) /* NOLINTNEXTLINE(google-explicit-constructor) */
-    operator void**() && noexcept requires(not std::same_as<PT,void*>)
+    explicit(false) /* NOLINTNEXTLINE(*-explicit-constructor) */
+    operator void**() && noexcept requires(std::is_pointer_v<PT> and not std::same_as<PT,void*>)
     {
-        static_assert(std::is_pointer_v<PT>,
-            "The pointer type must be void* compatible for operator void**");
         /* NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) */
         return reinterpret_cast<void**>(static_cast<PT*>(std::move(*this)));
     }
@@ -161,14 +160,12 @@ public:
     inout_ptr_t(const inout_ptr_t&) = delete;
     inout_ptr_t& operator=(const inout_ptr_t&) = delete;
 
-    explicit(false) constexpr /* NOLINTNEXTLINE(google-explicit-constructor) */
+    explicit(false) constexpr /* NOLINTNEXTLINE(*-explicit-constructor) */
     operator PT*() && noexcept { return std::addressof(mPtr); }
 
-    explicit(false) /* NOLINTNEXTLINE(google-explicit-constructor) */
-    operator void**() && noexcept requires(not std::same_as<PT,void*>)
+    explicit(false) /* NOLINTNEXTLINE(*-explicit-constructor) */
+    operator void**() && noexcept requires(std::is_pointer_v<PT> and not std::same_as<PT,void*>)
     {
-        static_assert(std::is_pointer_v<PT>,
-            "The pointer type must be void* compatible for operator void**");
         /* NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) */
         return reinterpret_cast<void**>(static_cast<PT*>(std::move(*this)));
     }

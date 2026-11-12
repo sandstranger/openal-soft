@@ -13,17 +13,19 @@
 #include <ranges>
 #include <span>
 
-#include "alnumeric.h"
 #include "fpu_ctrl.h"
-#include "gsl/gsl"
+#include "gsl/assert"
+#include "opthelpers.h"
 #include "zudl.hpp"
 
 #if HAVE_CXXMODULES
 import core.device;
-import types;
+import gsl;
+import numeric;
 #else
-#include "altypes.hpp"
 #include "core/devfmttraits.hpp"
+#include "gsl/gsl"
+#include "numeric.hpp"
 #endif
 
 
@@ -35,32 +37,36 @@ static_assert((BufferLineSize-1)/MaxPitch > 0, "MaxPitch is too large for Buffer
 static_assert((INT_MAX>>MixerFracBits)/MaxPitch > BufferLineSize,
     "MaxPitch and/or BufferLineSize are too large for MixerFracBits!");
 
-template<DevFmtType T> constexpr
-auto LoadSample(DevFmtType_t<T> val) noexcept -> float = delete;
+template<typename T> [[nodiscard]] constexpr
+auto LoadSample(T const& val) noexcept -> float
+{
+    if constexpr(std::same_as<T, float>)
+        return val;
+    else if constexpr(std::same_as<T, std::int32_t>)
+        return gsl::narrow_cast<float>(val) * (1.0f/2147483648.0f);
+    else if constexpr(std::same_as<T, std::int16_t>)
+        return gsl::narrow_cast<float>(val) * (1.0f/32768.0f);
+    else if constexpr(std::same_as<T, std::int8_t>)
+        return gsl::narrow_cast<float>(val) * (1.0f/128.0f);
+    else if constexpr(std::same_as<T, std::uint32_t>)
+        return LoadSample(static_cast<std::int32_t>(val - 2147483648u));
+    else if constexpr(std::same_as<T, std::uint16_t>)
+        return LoadSample(gsl::narrow_cast<std::int16_t>(val - 32768));
+    else if constexpr(std::same_as<T, std::uint8_t>)
+        return LoadSample(gsl::narrow_cast<std::int8_t>(val - 128));
+    else
+    {
+        static_assert(al::dependent_false<T>, "Unexpected sample type");
+        return {};
+    }
+}
 
-template<> constexpr auto LoadSample<DevFmtByte>(i8 const val) noexcept -> float
-{ return (val.as<f32>() * (1.0f/128.0f)).c_val; }
-template<> constexpr auto LoadSample<DevFmtShort>(i16 const val) noexcept -> float
-{ return (val.as<f32>() * (1.0f/32768.0f)).c_val; }
-template<> constexpr auto LoadSample<DevFmtInt>(i32 const val) noexcept -> float
-{ return (val.cast_to<f32>() * (1.0f/2147483648.0f)).c_val; }
-template<> constexpr auto LoadSample<DevFmtFloat>(f32 const val) noexcept -> float
-{ return val.c_val; }
-
-template<> constexpr auto LoadSample<DevFmtUByte>(u8 const val) noexcept -> float
-{ return LoadSample<DevFmtByte>((val - 128).reinterpret_as<i8>()); }
-template<> constexpr auto LoadSample<DevFmtUShort>(u16 const val) noexcept -> float
-{ return LoadSample<DevFmtShort>((val - 32768).reinterpret_as<i16>()); }
-template<> constexpr auto LoadSample<DevFmtUInt>(u32 const val) noexcept -> float
-{ return LoadSample<DevFmtInt>((val - 2147483648u).reinterpret_as<i32>()); }
-
-
-template<DevFmtType T>
+template<typename T>
 void LoadSampleArray(std::span<float> const dst, void const *const src, std::size_t const channel,
     std::size_t const srcstep) noexcept
 {
     Expects(channel < srcstep);
-    const auto srcspan = std::span{static_cast<const DevFmtType_t<T>*>(src), dst.size()*srcstep};
+    const auto srcspan = std::span{static_cast<T const*>(src), dst.size()*srcstep};
     auto ssrc = srcspan.begin();
     std::advance(ssrc, channel);
     dst.front() = LoadSample<T>(*ssrc);
@@ -75,102 +81,105 @@ void LoadSamples(std::span<float> const dst, void const *const src, std::size_t 
     std::size_t const srcstep, DevFmtType const srctype) noexcept
 {
 #define HANDLE_FMT(T)                                                         \
-    case T: LoadSampleArray<T>(dst, src, channel, srcstep); break
+    case T: LoadSampleArray<DevFmtType_t<T>>(dst, src, channel, srcstep); break
     switch(srctype)
     {
-        HANDLE_FMT(DevFmtByte);
-        HANDLE_FMT(DevFmtUByte);
-        HANDLE_FMT(DevFmtShort);
-        HANDLE_FMT(DevFmtUShort);
-        HANDLE_FMT(DevFmtInt);
-        HANDLE_FMT(DevFmtUInt);
-        HANDLE_FMT(DevFmtFloat);
+    HANDLE_FMT(DevFmtByte);
+    HANDLE_FMT(DevFmtUByte);
+    HANDLE_FMT(DevFmtShort);
+    HANDLE_FMT(DevFmtUShort);
+    HANDLE_FMT(DevFmtInt);
+    HANDLE_FMT(DevFmtUInt);
+    HANDLE_FMT(DevFmtFloat);
     }
 #undef HANDLE_FMT
 }
 
 
-template<DevFmtType T>
-auto StoreSample(float) noexcept -> DevFmtType_t<T> = delete;
+template<typename T> [[nodiscard]] constexpr
+auto StoreSample(float const val) noexcept -> T
+{
+    if constexpr(std::same_as<T, float>)
+        return val;
+    else if constexpr(std::same_as<T, std::int32_t>)
+        return al::saturating_cast<std::int32_t>(val*2147483648.0f);
+    else if constexpr(std::same_as<T, std::int16_t>)
+        return al::saturating_cast<std::int16_t>(val*32768.0f);
+    else if constexpr(std::same_as<T, std::int8_t>)
+        return al::saturating_cast<std::int8_t>(val*128.0f);
+    /* Unsigned output variations use the signed conversions with an offset. */
+    else if constexpr(std::same_as<T, std::uint32_t>)
+        return static_cast<std::uint32_t>(StoreSample<std::int32_t>(val)) + 2147483648u;
+    else if constexpr(std::same_as<T, std::uint16_t>)
+        return gsl::narrow_cast<std::uint16_t>(StoreSample<std::int16_t>(val) + 32768);
+    else if constexpr(std::same_as<T, std::uint8_t>)
+        return gsl::narrow_cast<std::uint8_t>(StoreSample<std::int8_t>(val) + 128);
+    else
+    {
+        static_assert(al::dependent_false<T>, "Unexpected sample type");
+        return T{};
+    }
+}
 
-template<> auto StoreSample<DevFmtFloat>(float const val) noexcept -> f32
-{ return f32{val}; }
-template<> auto StoreSample<DevFmtInt>(float const val) noexcept -> i32
-{ return i32{fastf2i(std::clamp(val*2147483648.0f, -2147483648.0f, 2147483520.0f))}; }
-template<> auto StoreSample<DevFmtShort>(float const val) noexcept -> i16
-{ return i16{gsl::narrow_cast<std::int16_t>(fastf2i(std::clamp(val*32768.0f, -32768.0f, 32767.0f)))}; }
-template<> auto StoreSample<DevFmtByte>(float const val) noexcept -> i8
-{ return i8{gsl::narrow_cast<std::int8_t>(fastf2i(std::clamp(val*128.0f, -128.0f, 127.0f)))}; }
-
-/* Define unsigned output variations. */
-template<> auto StoreSample<DevFmtUInt>(float const val) noexcept -> u32
-{ return StoreSample<DevFmtInt>(val).reinterpret_as<u32>() + 2147483648u; }
-template<> auto StoreSample<DevFmtUShort>(float const val) noexcept -> u16
-{ return StoreSample<DevFmtShort>(val).reinterpret_as<u16>() + 32768; }
-template<> auto StoreSample<DevFmtUByte>(float const val) noexcept -> u8
-{ return StoreSample<DevFmtByte>(val).reinterpret_as<u8>() + 128; }
-
-template<DevFmtType T>
+template<typename T>
 void StoreSampleArray(void *const dst, std::span<float const> const src, std::size_t const channel,
     std::size_t const dststep) noexcept
 {
     Expects(channel < dststep);
-    const auto dstspan = std::span{static_cast<DevFmtType_t<T>*>(dst), src.size()*dststep};
+    const auto dstspan = std::span{static_cast<T*>(dst), src.size()*dststep};
     auto sdst = dstspan.begin();
     std::advance(sdst, channel);
     *sdst = StoreSample<T>(src.front());
-    std::ranges::for_each(src | std::views::drop(1), [&sdst,dststep](float const in)
+    std::ranges::for_each(src | std::views::drop(1), [&sdst, dststep](float const in)
     {
         std::advance(sdst, dststep);
         *sdst = StoreSample<T>(in);
     });
 }
 
-
 void StoreSamples(void *const dst, std::span<float const> const src, std::size_t const channel,
     std::size_t const dststep, DevFmtType const dsttype) noexcept
 {
 #define HANDLE_FMT(T)                                                         \
-    case T: StoreSampleArray<T>(dst, src, channel, dststep); break
+    case T: StoreSampleArray<DevFmtType_t<T>>(dst, src, channel, dststep); break
     switch(dsttype)
     {
-        HANDLE_FMT(DevFmtByte);
-        HANDLE_FMT(DevFmtUByte);
-        HANDLE_FMT(DevFmtShort);
-        HANDLE_FMT(DevFmtUShort);
-        HANDLE_FMT(DevFmtInt);
-        HANDLE_FMT(DevFmtUInt);
-        HANDLE_FMT(DevFmtFloat);
+    HANDLE_FMT(DevFmtByte);
+    HANDLE_FMT(DevFmtUByte);
+    HANDLE_FMT(DevFmtShort);
+    HANDLE_FMT(DevFmtUShort);
+    HANDLE_FMT(DevFmtInt);
+    HANDLE_FMT(DevFmtUInt);
+    HANDLE_FMT(DevFmtFloat);
     }
 #undef HANDLE_FMT
 }
 
 
-template<DevFmtType T>
+template<typename T>
 void Mono2Stereo(std::span<float> const dst, void const *const src) noexcept
 {
-    const auto srcspan = std::span{static_cast<DevFmtType_t<T> const*>(src), dst.size()>>1};
+    const auto srcspan = std::span{static_cast<T const*>(src), dst.size()>>1};
     auto sdst = dst.begin();
     std::ranges::for_each(srcspan, [&sdst](float const in)
     { sdst = std::fill_n(sdst, 2, in*0.707106781187f); }, &LoadSample<T>);
 }
 
-template<DevFmtType T>
+template<typename T>
 void Multi2Mono(unsigned chanmask, std::size_t const step, std::span<float> const dst,
     void const *const src) noexcept
 {
     const auto scale = std::sqrt(1.0f / gsl::narrow_cast<float>(std::popcount(chanmask)));
-    const auto srcspan = std::span{static_cast<DevFmtType_t<T> const*>(src), step*dst.size()};
+    const auto srcspan = std::span{static_cast<T const*>(src), step*dst.size()};
     std::ranges::fill(dst, 0.0f);
     while(chanmask)
     {
         const auto c = std::countr_zero(chanmask);
         chanmask &= ~(1u << c);
 
-        auto ssrc = srcspan.begin();
-        std::advance(ssrc, c);
+        auto ssrc = std::next(srcspan.begin(), c);
         dst.front() += LoadSample<T>(*ssrc);
-        std::ranges::for_each(dst | std::views::drop(1), [&ssrc,step](float &sample)
+        std::ranges::for_each(dst | std::views::drop(1), [&ssrc, step](float &sample)
         {
             std::advance(ssrc, step);
             sample += LoadSample<T>(*ssrc);
@@ -237,15 +246,11 @@ auto SampleConverter::availableOut(unsigned const srcframes) const -> unsigned
         return 0;
     }
 
-    auto DataSize64 = u64{prepcount};
-    DataSize64 += u64{srcframes};
-    DataSize64 -= MaxResamplerPadding;
+    auto DataSize64 = std::uint64_t{prepcount} + srcframes - MaxResamplerPadding;
     DataSize64 <<= MixerFracBits;
-    DataSize64 -= u64{mFracOffset};
+    DataSize64 -= mFracOffset;
 
-    /* If we have a full prep, we can generate at least one sample. */
-    return gsl::narrow_cast<unsigned>(std::clamp((DataSize64 + u64{mIncrement}-1)/u64{mIncrement},
-        1_u64, u64{std::numeric_limits<int>::max()}).c_val);
+    return al::saturating_cast<unsigned>((DataSize64 + mIncrement-1)/mIncrement);
 }
 
 auto SampleConverter::convert(const void **const src, unsigned *const srcframes, void *const dst,
@@ -282,16 +287,15 @@ auto SampleConverter::convert(const void **const src, unsigned *const srcframes,
         const auto SrcData = std::span<float>{mSrcSamples};
         const auto DstData = std::span<float>{mDstSamples};
         const auto DataPosFrac = mFracOffset;
-        auto DataSize64 = u64{prepcount};
-        DataSize64 += u64{readable};
-        DataSize64 -= MaxResamplerPadding;
-        DataSize64 <<= MixerFracBits;
-        DataSize64 -= u64{DataPosFrac};
 
         /* If we have a full prep, we can generate at least one sample. */
-        auto DstSize = gsl::narrow_cast<unsigned>(std::clamp((DataSize64 + u64{increment}-1)/u64{increment},
-            1_u64, u64{BufferLineSize}).c_val);
-        DstSize = std::min(DstSize, dstframes-pos);
+        auto const DstSize = std::invoke([&] {
+            auto DataSize64 = std::uint64_t{prepcount} + readable - MaxResamplerPadding;
+            DataSize64 <<= MixerFracBits;
+            DataSize64 -= DataPosFrac;
+            auto const outcount = (DataSize64 + increment-1)/increment;
+            return std::min(al::saturating_cast<unsigned>(outcount), dstframes-pos);
+        });
 
         const auto DataPosEnd = DstSize*increment + DataPosFrac;
         const auto SrcDataEnd = DataPosEnd>>MixerFracBits;
@@ -379,16 +383,15 @@ auto SampleConverter::convertPlanar(void const **const src, unsigned *const srcf
         const auto SrcData = std::span{mSrcSamples};
         const auto DstData = std::span{mDstSamples};
         const auto DataPosFrac = mFracOffset;
-        auto DataSize64 = u64{prepcount};
-        DataSize64 += u64{readable};
-        DataSize64 -= MaxResamplerPadding;
-        DataSize64 <<= MixerFracBits;
-        DataSize64 -= u64{DataPosFrac};
 
         /* If we have a full prep, we can generate at least one sample. */
-        auto DstSize = gsl::narrow_cast<unsigned>(std::clamp((DataSize64 + u64{increment}-1)/u64{increment},
-            1_u64, u64{BufferLineSize}).c_val);
-        DstSize = std::min(DstSize, dstframes-pos);
+        auto const DstSize = std::invoke([&] {
+            auto DataSize64 = std::uint64_t{prepcount} + readable - MaxResamplerPadding;
+            DataSize64 <<= MixerFracBits;
+            DataSize64 -= DataPosFrac;
+            auto const outcount = (DataSize64 + increment-1)/increment;
+            return std::min(al::saturating_cast<unsigned>(outcount), dstframes-pos);
+        });
 
         const auto DataPosEnd = DstSize*increment + DataPosFrac;
         const auto SrcDataEnd = DataPosEnd>>MixerFracBits;
@@ -453,7 +456,8 @@ void ChannelConverter::convert(void const *const src, float *const dst, unsigned
     {
         switch(mSrcType)
         {
-#define HANDLE_FMT(T) case T: Multi2Mono<T>(mChanMask, mSrcStep, {dst, frames}, src); break
+#define HANDLE_FMT(T) case T:                                                 \
+    Multi2Mono<DevFmtType_t<T>>(mChanMask, mSrcStep, {dst, frames}, src); break
         HANDLE_FMT(DevFmtByte);
         HANDLE_FMT(DevFmtUByte);
         HANDLE_FMT(DevFmtShort);
@@ -468,7 +472,7 @@ void ChannelConverter::convert(void const *const src, float *const dst, unsigned
     {
         switch(mSrcType)
         {
-#define HANDLE_FMT(T) case T: Mono2Stereo<T>({dst, frames*2_uz}, src); break
+#define HANDLE_FMT(T) case T: Mono2Stereo<DevFmtType_t<T>>({dst, frames*2_uz}, src); break
         HANDLE_FMT(DevFmtByte);
         HANDLE_FMT(DevFmtUByte);
         HANDLE_FMT(DevFmtShort);

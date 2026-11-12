@@ -1,11 +1,11 @@
 #ifndef CORE_ALLPASS_IIR_HPP
 #define CORE_ALLPASS_IIR_HPP
 
+#include <algorithm>
 #include <array>
 #include <ranges>
 #include <span>
 
-#include "alnumeric.h"
 #include "zudl.hpp"
 
 

@@ -25,10 +25,10 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <iterator>
 #include <memory>
 #include <numbers>
-#include <numeric>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -40,7 +40,6 @@
 #include "AL/alext.h"
 
 #include "alconfig.h"
-#include "alnumeric.h"
 #include "alu.h"
 #include "core/ambdec.h"
 #include "core/ambidefs.h"
@@ -60,21 +59,28 @@
 #include "zudl.hpp"
 
 #if HAVE_CXXMODULES
+/* HACK: GCC 16 seems to have an issue when trying to use the StereoEncoding
+ * enum in an optional when it's defined through the module. Including the
+ * header to directly define it seems to work around it.
+ */
+#if !defined(__INTEL_COMPILER) && !defined(__clang__) && defined(__GNUC__) && __GNUC__ == 16
+#include "alc/device.h"
+#endif
 import alc.context;
 import alc.device;
 import alstring;
 import gsl;
 import hrtfstore;
 import logging;
-import types;
+import numeric;
 #else
 #include "alc/context.hpp"
 #include "alc/device.h"
-#include "alformattypes.hpp"
 #include "alstring.h"
 #include "core/hrtfstore.hpp"
 #include "core/logging.h"
 #include "gsl/gsl"
+#include "numeric.hpp"
 #endif
 
 
@@ -211,7 +217,7 @@ struct DecoderConfig;
 
 template<std::size_t N>
 struct DecoderConfig<SingleBand, N> {
-    u8 mOrder{};
+    std::uint8_t mOrder{};
     SpatialMode m3DMode{};
     std::array<Channel, N> mChannels{};
     DevAmbiScaling mScaling{};
@@ -221,26 +227,26 @@ struct DecoderConfig<SingleBand, N> {
 
 template<std::size_t N>
 struct DecoderConfig<DualBand, N> {
-    u8 mOrder{};
+    std::uint8_t mOrder{};
     SpatialMode m3DMode{};
     std::array<Channel, N> mChannels{};
     DevAmbiScaling mScaling{};
-    std::array<float, MaxAmbiOrder+1> mOrderGain{};
-    std::array<ChannelCoeffs, N> mCoeffs{};
+    std::array<float, MaxAmbiOrder+1> mOrderGainHF{};
+    std::array<ChannelCoeffs, N> mCoeffsHF{};
     std::array<float, MaxAmbiOrder+1> mOrderGainLF{};
     std::array<ChannelCoeffs, N> mCoeffsLF{};
 };
 
 template<>
 struct DecoderConfig<DualBand, 0> {
-    u8 mOrder{};
+    std::uint8_t mOrder{};
     SpatialMode m3DMode{};
-    std::span<Channel const> mChannels;
+    std::span<Channel const> mChannels{};
     DevAmbiScaling mScaling{};
-    std::span<float const> mOrderGain;
-    std::span<ChannelCoeffs const> mCoeffs;
-    std::span<float const> mOrderGainLF;
-    std::span<ChannelCoeffs const> mCoeffsLF;
+    std::span<float const> mOrderGain{};
+    std::span<ChannelCoeffs const> mCoeffs{};
+    std::span<float const> mOrderGainLF{};
+    std::span<ChannelCoeffs const> mCoeffsLF{};
 
     template<std::size_t N>
     auto operator=(const DecoderConfig<SingleBand,N> &rhs) & noexcept -> DecoderConfig&
@@ -263,8 +269,8 @@ struct DecoderConfig<DualBand, 0> {
         m3DMode = rhs.m3DMode;
         mChannels = rhs.mChannels;
         mScaling = rhs.mScaling;
-        mOrderGain = rhs.mOrderGain;
-        mCoeffs = rhs.mCoeffs;
+        mOrderGain = rhs.mOrderGainHF;
+        mCoeffs = rhs.mCoeffsHF;
         mOrderGainLF = rhs.mOrderGainLF;
         mCoeffsLF = rhs.mCoeffsLF;
         return *this;
@@ -331,7 +337,7 @@ void InitDistanceComp(al::Device *const device, std::span<Channel const> const c
          * phase offsets. This means at 48khz, for instance, the distance delay
          * will be in steps of about 7 millimeters.
          */
-        auto delay = std::floor((maxdist - distance)*distSampleScale + 0.5f);
+        auto delay = std::round((maxdist-distance) * distSampleScale);
         if(delay > float{DistanceComp::MaxDelay-1})
         {
             ERR("Delay for channel {} ({}) exceeds buffer length ({} > {})", idx,
@@ -342,7 +348,7 @@ void InitDistanceComp(al::Device *const device, std::span<Channel const> const c
         ChanDelay.resize(std::max(ChanDelay.size(), idx+1_uz));
         if(distance > 0.0f)
         {
-            ChanDelay[idx].Length = gsl::narrow_cast<unsigned>(delay);
+            ChanDelay[idx].Length = al::saturating_cast<unsigned>(delay);
             ChanDelay[idx].Gain = distance / maxdist;
         }
         TRACE("Channel {} distance comp: {} samples, {:f} gain", GetLabelFromChannel(ch),
@@ -400,9 +406,9 @@ auto MakeDecoderView(al::Device const *const device, AmbDecConf const *const con
 {
     auto ret = DecoderView{};
 
-    decoder.mOrder = (conf->ChanMask > Ambi3OrderMask) ? 4_u8 :
-        (conf->ChanMask > Ambi2OrderMask) ? 3_u8 :
-        (conf->ChanMask > Ambi1OrderMask) ? 2_u8 : 1_u8;
+    decoder.mOrder = (conf->ChanMask > Ambi3OrderMask) ? std::uint8_t{4} :
+        (conf->ChanMask > Ambi2OrderMask) ? std::uint8_t{3} :
+        (conf->ChanMask > Ambi1OrderMask) ? std::uint8_t{2} : std::uint8_t{1};
     decoder.m3DMode = (conf->ChanMask&AmbiPeriphonicMask) ? Periphonic : Pantaphonic;
 
     switch(conf->CoeffScale)
@@ -413,13 +419,13 @@ auto MakeDecoderView(al::Device const *const device, AmbDecConf const *const con
     case AmbDecScale::FuMa: decoder.mScaling = DevAmbiScaling::FuMa; break;
     }
 
-    std::ranges::copy(conf->HFOrderGain | std::views::take(decoder.mOrderGain.size()),
-        decoder.mOrderGain.begin());
+    std::ranges::copy(conf->HFOrderGain | std::views::take(decoder.mOrderGainHF.size()),
+        decoder.mOrderGainHF.begin());
     std::ranges::copy(conf->LFOrderGain | std::views::take(decoder.mOrderGainLF.size()),
         decoder.mOrderGainLF.begin());
 
-    const auto num_coeffs = (decoder.m3DMode==Periphonic) ? AmbiChannelsFromOrder(decoder.mOrder.c_val)
-        : Ambi2DChannelsFromOrder(decoder.mOrder.c_val);
+    const auto num_coeffs = (decoder.m3DMode==Periphonic) ? AmbiChannelsFromOrder(decoder.mOrder)
+        : Ambi2DChannelsFromOrder(decoder.mOrder);
     const auto idx_map = (decoder.m3DMode == Periphonic)
         ? std::span<std::uint8_t const>{AmbiIndex::FromACN}
         : std::span<std::uint8_t const>{AmbiIndex::FromACN2D};
@@ -509,7 +515,7 @@ auto MakeDecoderView(al::Device const *const device, AmbDecConf const *const con
 
         decoder.mChannels[chan_count] = ch;
         for(auto const dst : std::views::iota(0_uz, num_coeffs))
-            decoder.mCoeffs[chan_count][dst] = hfmatrix[chan_count][idx_map[dst]];
+            decoder.mCoeffsHF[chan_count][dst] = hfmatrix[chan_count][idx_map[dst]];
         if(conf->FreqBands > 1)
         {
             for(auto const dst : std::views::iota(0_uz, num_coeffs))
@@ -524,8 +530,8 @@ auto MakeDecoderView(al::Device const *const device, AmbDecConf const *const con
         ret.m3DMode = decoder.m3DMode;
         ret.mScaling = decoder.mScaling;
         ret.mChannels = std::span{decoder.mChannels}.first(chan_count);
-        ret.mOrderGain = decoder.mOrderGain;
-        ret.mCoeffs = std::span{decoder.mCoeffs}.first(chan_count);
+        ret.mOrderGain = decoder.mOrderGainHF;
+        ret.mCoeffs = std::span{decoder.mCoeffsHF}.first(chan_count);
         if(conf->FreqBands > 1)
         {
             ret.mOrderGainLF = decoder.mOrderGainLF;
@@ -536,179 +542,195 @@ auto MakeDecoderView(al::Device const *const device, AmbDecConf const *const con
 }
 
 constexpr auto MonoConfig = DecoderConfig<SingleBand, 1>{
-    0_u8, Pantaphonic, {{FrontCenter}},
-    DevAmbiScaling::N3D,
-    {{1.0f}},
-    {{ {{1.0f}} }}
+    .mOrder = 0,
+    .m3DMode = Pantaphonic,
+    .mChannels = {FrontCenter},
+    .mScaling = DevAmbiScaling::N3D,
+    .mOrderGain = {1.0f},
+    .mCoeffs = std::to_array<ChannelCoeffs>({{1.0f}})
 };
 constexpr auto StereoConfig = DecoderConfig<SingleBand, 2>{
-    1_u8, Pantaphonic, {{FrontLeft, FrontRight}},
-    DevAmbiScaling::N3D,
-    {{1.0f, 1.0f}},
-    {{
-        {{5.00000000e-1f,  2.88675135e-1f,  5.52305643e-2f}},
-        {{5.00000000e-1f, -2.88675135e-1f,  5.52305643e-2f}},
-    }}
+    .mOrder = 1,
+    .m3DMode = Pantaphonic,
+    .mChannels = {FrontLeft, FrontRight},
+    .mScaling = DevAmbiScaling::N3D,
+    .mOrderGain = {1.0f, 1.0f},
+    .mCoeffs = std::to_array<ChannelCoeffs>({
+        {5.00000000e-1f,  2.88675135e-1f,  5.52305643e-2f},
+        {5.00000000e-1f, -2.88675135e-1f,  5.52305643e-2f},
+    })
 };
 constexpr auto QuadConfig = DecoderConfig<DualBand, 4>{
-    1_u8, Pantaphonic, {{BackLeft, FrontLeft, FrontRight, BackRight}},
-    DevAmbiScaling::N3D,
-    /*HF*/{{1.41421356e+0f, 1.00000000e+0f}},
-    {{
-        {{2.50000000e-1f,  2.04124145e-1f, -2.04124145e-1f}},
-        {{2.50000000e-1f,  2.04124145e-1f,  2.04124145e-1f}},
-        {{2.50000000e-1f, -2.04124145e-1f,  2.04124145e-1f}},
-        {{2.50000000e-1f, -2.04124145e-1f, -2.04124145e-1f}},
-    }},
-    /*LF*/{{1.00000000e+0f, 1.00000000e+0f}},
-    {{
-        {{2.50000000e-1f,  2.04124145e-1f, -2.04124145e-1f}},
-        {{2.50000000e-1f,  2.04124145e-1f,  2.04124145e-1f}},
-        {{2.50000000e-1f, -2.04124145e-1f,  2.04124145e-1f}},
-        {{2.50000000e-1f, -2.04124145e-1f, -2.04124145e-1f}},
-    }}
+    .mOrder = 1,
+    .m3DMode = Pantaphonic,
+    .mChannels = {BackLeft, FrontLeft, FrontRight, BackRight},
+    .mScaling = DevAmbiScaling::N3D,
+    .mOrderGainHF = {1.41421356e+0f, 1.00000000e+0f},
+    .mCoeffsHF = std::to_array<ChannelCoeffs>({
+        {2.50000000e-1f,  2.04124145e-1f, -2.04124145e-1f},
+        {2.50000000e-1f,  2.04124145e-1f,  2.04124145e-1f},
+        {2.50000000e-1f, -2.04124145e-1f,  2.04124145e-1f},
+        {2.50000000e-1f, -2.04124145e-1f, -2.04124145e-1f},
+    }),
+    .mOrderGainLF = {1.00000000e+0f, 1.00000000e+0f},
+    .mCoeffsLF = std::to_array<ChannelCoeffs>({
+        {2.50000000e-1f,  2.04124145e-1f, -2.04124145e-1f},
+        {2.50000000e-1f,  2.04124145e-1f,  2.04124145e-1f},
+        {2.50000000e-1f, -2.04124145e-1f,  2.04124145e-1f},
+        {2.50000000e-1f, -2.04124145e-1f, -2.04124145e-1f},
+    })
 };
 constexpr auto X51Config = DecoderConfig<DualBand, 5>{
-    2_u8, Pantaphonic, {{SideLeft, FrontLeft, FrontCenter, FrontRight, SideRight}},
-    DevAmbiScaling::FuMa,
-    /*HF*/{{1.00000000e+0f, 1.00000000e+0f, 1.00000000e+0f}},
-    {{
-        {{5.67316000e-1f,  4.22920000e-1f, -3.15495000e-1f, -6.34490000e-2f, -2.92380000e-2f}},
-        {{3.68584000e-1f,  2.72349000e-1f,  3.21616000e-1f,  1.92645000e-1f,  4.82600000e-2f}},
-        {{1.83579000e-1f,  0.00000000e+0f,  1.99588000e-1f,  0.00000000e+0f,  9.62820000e-2f}},
-        {{3.68584000e-1f, -2.72349000e-1f,  3.21616000e-1f, -1.92645000e-1f,  4.82600000e-2f}},
-        {{5.67316000e-1f, -4.22920000e-1f, -3.15495000e-1f,  6.34490000e-2f, -2.92380000e-2f}},
-    }},
-    /*LF*/{{1.00000000e+0f, 1.00000000e+0f, 1.00000000e+0f}},
-    {{
-        {{4.90109850e-1f,  3.77305010e-1f, -3.73106990e-1f, -1.25914530e-1f,  1.45133000e-2f}},
-        {{1.49085730e-1f,  3.03561680e-1f,  1.53290060e-1f,  2.45112480e-1f, -1.50753130e-1f}},
-        {{1.37654920e-1f,  0.00000000e+0f,  4.49417940e-1f,  0.00000000e+0f,  2.57844070e-1f}},
-        {{1.49085730e-1f, -3.03561680e-1f,  1.53290060e-1f, -2.45112480e-1f, -1.50753130e-1f}},
-        {{4.90109850e-1f, -3.77305010e-1f, -3.73106990e-1f,  1.25914530e-1f,  1.45133000e-2f}},
-    }}
+    .mOrder = 2,
+    .m3DMode = Pantaphonic,
+    .mChannels = {SideLeft, FrontLeft, FrontCenter, FrontRight, SideRight},
+    .mScaling = DevAmbiScaling::FuMa,
+    .mOrderGainHF = {1.00000000e+0f, 1.00000000e+0f, 1.00000000e+0f},
+    .mCoeffsHF = std::to_array<ChannelCoeffs>({
+        {5.67316000e-1f,  4.22920000e-1f, -3.15495000e-1f, -6.34490000e-2f, -2.92380000e-2f},
+        {3.68584000e-1f,  2.72349000e-1f,  3.21616000e-1f,  1.92645000e-1f,  4.82600000e-2f},
+        {1.83579000e-1f,  0.00000000e+0f,  1.99588000e-1f,  0.00000000e+0f,  9.62820000e-2f},
+        {3.68584000e-1f, -2.72349000e-1f,  3.21616000e-1f, -1.92645000e-1f,  4.82600000e-2f},
+        {5.67316000e-1f, -4.22920000e-1f, -3.15495000e-1f,  6.34490000e-2f, -2.92380000e-2f},
+    }),
+    .mOrderGainLF = {1.00000000e+0f, 1.00000000e+0f, 1.00000000e+0f},
+    .mCoeffsLF = std::to_array<ChannelCoeffs>({
+        {4.90109850e-1f,  3.77305010e-1f, -3.73106990e-1f, -1.25914530e-1f,  1.45133000e-2f},
+        {1.49085730e-1f,  3.03561680e-1f,  1.53290060e-1f,  2.45112480e-1f, -1.50753130e-1f},
+        {1.37654920e-1f,  0.00000000e+0f,  4.49417940e-1f,  0.00000000e+0f,  2.57844070e-1f},
+        {1.49085730e-1f, -3.03561680e-1f,  1.53290060e-1f, -2.45112480e-1f, -1.50753130e-1f},
+        {4.90109850e-1f, -3.77305010e-1f, -3.73106990e-1f,  1.25914530e-1f,  1.45133000e-2f},
+    })
 };
 constexpr auto X61Config = DecoderConfig<SingleBand, 5>{
-    2_u8, Pantaphonic, {{SideLeft, FrontLeft, FrontRight, SideRight, BackCenter}},
-    DevAmbiScaling::N3D,
-    {{1.0f, 1.0f, 1.0f}},
-    {{
-        {{2.04460341e-1f,  2.17177926e-1f, -4.39996780e-2f, -2.60790269e-2f, -6.87239792e-2f}},
-        {{1.58923161e-1f,  9.21772680e-2f,  1.59658796e-1f,  6.66278083e-2f,  3.84686854e-2f}},
-        {{1.58923161e-1f, -9.21772680e-2f,  1.59658796e-1f, -6.66278083e-2f,  3.84686854e-2f}},
-        {{2.04460341e-1f, -2.17177926e-1f, -4.39996780e-2f,  2.60790269e-2f, -6.87239792e-2f}},
-        {{2.50001688e-1f,  0.00000000e+0f, -2.50000094e-1f,  0.00000000e+0f,  6.05133395e-2f}},
-    }}
+    .mOrder = 2,
+    .m3DMode = Pantaphonic,
+    .mChannels = {SideLeft, FrontLeft, FrontRight, SideRight, BackCenter},
+    .mScaling = DevAmbiScaling::N3D,
+    .mOrderGain = {1.0f, 1.0f, 1.0f},
+    .mCoeffs = std::to_array<ChannelCoeffs>({
+        {2.04460341e-1f,  2.17177926e-1f, -4.39996780e-2f, -2.60790269e-2f, -6.87239792e-2f},
+        {1.58923161e-1f,  9.21772680e-2f,  1.59658796e-1f,  6.66278083e-2f,  3.84686854e-2f},
+        {1.58923161e-1f, -9.21772680e-2f,  1.59658796e-1f, -6.66278083e-2f,  3.84686854e-2f},
+        {2.04460341e-1f, -2.17177926e-1f, -4.39996780e-2f,  2.60790269e-2f, -6.87239792e-2f},
+        {2.50001688e-1f,  0.00000000e+0f, -2.50000094e-1f,  0.00000000e+0f,  6.05133395e-2f},
+    })
 };
 constexpr auto X71Config = DecoderConfig<DualBand, 6>{
-    2_u8, Pantaphonic, {{BackLeft, SideLeft, FrontLeft, FrontRight, SideRight, BackRight}},
-    DevAmbiScaling::N3D,
-    /*HF*/{{1.41421356e+0f, 1.22474487e+0f, 7.07106781e-1f}},
-    {{
-        {{1.66666667e-1f,  9.62250449e-2f, -1.66666667e-1f, -1.49071198e-1f,  8.60662966e-2f}},
-        {{1.66666667e-1f,  1.92450090e-1f,  0.00000000e+0f,  0.00000000e+0f, -1.72132593e-1f}},
-        {{1.66666667e-1f,  9.62250449e-2f,  1.66666667e-1f,  1.49071198e-1f,  8.60662966e-2f}},
-        {{1.66666667e-1f, -9.62250449e-2f,  1.66666667e-1f, -1.49071198e-1f,  8.60662966e-2f}},
-        {{1.66666667e-1f, -1.92450090e-1f,  0.00000000e+0f,  0.00000000e+0f, -1.72132593e-1f}},
-        {{1.66666667e-1f, -9.62250449e-2f, -1.66666667e-1f,  1.49071198e-1f,  8.60662966e-2f}},
-    }},
-    /*LF*/{{1.00000000e+0f, 1.00000000e+0f, 1.00000000e+0f}},
-    {{
-        {{1.66666667e-1f,  9.62250449e-2f, -1.66666667e-1f, -1.49071198e-1f,  8.60662966e-2f}},
-        {{1.66666667e-1f,  1.92450090e-1f,  0.00000000e+0f,  0.00000000e+0f, -1.72132593e-1f}},
-        {{1.66666667e-1f,  9.62250449e-2f,  1.66666667e-1f,  1.49071198e-1f,  8.60662966e-2f}},
-        {{1.66666667e-1f, -9.62250449e-2f,  1.66666667e-1f, -1.49071198e-1f,  8.60662966e-2f}},
-        {{1.66666667e-1f, -1.92450090e-1f,  0.00000000e+0f,  0.00000000e+0f, -1.72132593e-1f}},
-        {{1.66666667e-1f, -9.62250449e-2f, -1.66666667e-1f,  1.49071198e-1f,  8.60662966e-2f}},
-    }}
+    .mOrder = 2,
+    .m3DMode = Pantaphonic,
+    .mChannels = {BackLeft, SideLeft, FrontLeft, FrontRight, SideRight, BackRight},
+    .mScaling = DevAmbiScaling::N3D,
+    .mOrderGainHF = {1.41421356e+0f, 1.22474487e+0f, 7.07106781e-1f},
+    .mCoeffsHF = std::to_array<ChannelCoeffs>({
+        {1.66666667e-1f,  9.62250449e-2f, -1.66666667e-1f, -1.49071198e-1f,  8.60662966e-2f},
+        {1.66666667e-1f,  1.92450090e-1f,  0.00000000e+0f,  0.00000000e+0f, -1.72132593e-1f},
+        {1.66666667e-1f,  9.62250449e-2f,  1.66666667e-1f,  1.49071198e-1f,  8.60662966e-2f},
+        {1.66666667e-1f, -9.62250449e-2f,  1.66666667e-1f, -1.49071198e-1f,  8.60662966e-2f},
+        {1.66666667e-1f, -1.92450090e-1f,  0.00000000e+0f,  0.00000000e+0f, -1.72132593e-1f},
+        {1.66666667e-1f, -9.62250449e-2f, -1.66666667e-1f,  1.49071198e-1f,  8.60662966e-2f},
+    }),
+    .mOrderGainLF = {1.00000000e+0f, 1.00000000e+0f, 1.00000000e+0f},
+    .mCoeffsLF = std::to_array<ChannelCoeffs>({
+        {1.66666667e-1f,  9.62250449e-2f, -1.66666667e-1f, -1.49071198e-1f,  8.60662966e-2f},
+        {1.66666667e-1f,  1.92450090e-1f,  0.00000000e+0f,  0.00000000e+0f, -1.72132593e-1f},
+        {1.66666667e-1f,  9.62250449e-2f,  1.66666667e-1f,  1.49071198e-1f,  8.60662966e-2f},
+        {1.66666667e-1f, -9.62250449e-2f,  1.66666667e-1f, -1.49071198e-1f,  8.60662966e-2f},
+        {1.66666667e-1f, -1.92450090e-1f,  0.00000000e+0f,  0.00000000e+0f, -1.72132593e-1f},
+        {1.66666667e-1f, -9.62250449e-2f, -1.66666667e-1f,  1.49071198e-1f,  8.60662966e-2f},
+    })
 };
 constexpr auto X3D71Config = DecoderConfig<DualBand, 6>{
-    1_u8, Periphonic, {{Aux0, SideLeft, FrontLeft, FrontRight, SideRight, Aux1}},
-    DevAmbiScaling::N3D,
-    /*HF*/{{1.73205081e+0f, 1.00000000e+0f}},
-    {{
-        {{1.666666667e-01f,  0.000000000e+00f,  2.356640879e-01f, -1.667265410e-01f}},
-        {{1.666666667e-01f,  2.033043281e-01f, -1.175581508e-01f, -1.678904388e-01f}},
-        {{1.666666667e-01f,  2.033043281e-01f,  1.175581508e-01f,  1.678904388e-01f}},
-        {{1.666666667e-01f, -2.033043281e-01f,  1.175581508e-01f,  1.678904388e-01f}},
-        {{1.666666667e-01f, -2.033043281e-01f, -1.175581508e-01f, -1.678904388e-01f}},
-        {{1.666666667e-01f,  0.000000000e+00f, -2.356640879e-01f,  1.667265410e-01f}},
-    }},
-    /*LF*/{{1.00000000e+0f, 1.00000000e+0f}},
-    {{
-        {{1.666666667e-01f,  0.000000000e+00f,  2.356640879e-01f, -1.667265410e-01f}},
-        {{1.666666667e-01f,  2.033043281e-01f, -1.175581508e-01f, -1.678904388e-01f}},
-        {{1.666666667e-01f,  2.033043281e-01f,  1.175581508e-01f,  1.678904388e-01f}},
-        {{1.666666667e-01f, -2.033043281e-01f,  1.175581508e-01f,  1.678904388e-01f}},
-        {{1.666666667e-01f, -2.033043281e-01f, -1.175581508e-01f, -1.678904388e-01f}},
-        {{1.666666667e-01f,  0.000000000e+00f, -2.356640879e-01f,  1.667265410e-01f}},
-    }}
+    .mOrder = 1,
+    .m3DMode = Periphonic,
+    .mChannels = {Aux0, SideLeft, FrontLeft, FrontRight, SideRight, Aux1},
+    .mScaling = DevAmbiScaling::N3D,
+    .mOrderGainHF = {1.73205081e+0f, 1.00000000e+0f},
+    .mCoeffsHF = std::to_array<ChannelCoeffs>({
+        {1.666666667e-01f,  0.000000000e+00f,  2.356640879e-01f, -1.667265410e-01f},
+        {1.666666667e-01f,  2.033043281e-01f, -1.175581508e-01f, -1.678904388e-01f},
+        {1.666666667e-01f,  2.033043281e-01f,  1.175581508e-01f,  1.678904388e-01f},
+        {1.666666667e-01f, -2.033043281e-01f,  1.175581508e-01f,  1.678904388e-01f},
+        {1.666666667e-01f, -2.033043281e-01f, -1.175581508e-01f, -1.678904388e-01f},
+        {1.666666667e-01f,  0.000000000e+00f, -2.356640879e-01f,  1.667265410e-01f},
+    }),
+    .mOrderGainLF = {1.00000000e+0f, 1.00000000e+0f},
+    .mCoeffsLF = std::to_array<ChannelCoeffs>({
+        {1.666666667e-01f,  0.000000000e+00f,  2.356640879e-01f, -1.667265410e-01f},
+        {1.666666667e-01f,  2.033043281e-01f, -1.175581508e-01f, -1.678904388e-01f},
+        {1.666666667e-01f,  2.033043281e-01f,  1.175581508e-01f,  1.678904388e-01f},
+        {1.666666667e-01f, -2.033043281e-01f,  1.175581508e-01f,  1.678904388e-01f},
+        {1.666666667e-01f, -2.033043281e-01f, -1.175581508e-01f, -1.678904388e-01f},
+        {1.666666667e-01f,  0.000000000e+00f, -2.356640879e-01f,  1.667265410e-01f},
+    })
 };
 constexpr auto X714Config = DecoderConfig<SingleBand, 10>{
-    1_u8, Periphonic,
-    {{FrontLeft, FrontRight, SideLeft, SideRight, BackLeft, BackRight, TopFrontLeft, TopFrontRight,
-        TopBackLeft, TopBackRight }},
-    DevAmbiScaling::N3D,
-    {{1.00000000e+0f, 1.00000000e+0f, 1.00000000e+0f}},
-    {{
-        {{1.27149251e-01f,  7.63047539e-02f, -3.64373750e-02f,  1.59700680e-01f}},
-        {{1.07005418e-01f, -7.67638760e-02f, -4.92129762e-02f,  1.29012797e-01f}},
-        {{1.26400196e-01f,  1.77494694e-01f, -3.71203389e-02f,  0.00000000e+00f}},
-        {{1.26396516e-01f, -1.77488059e-01f, -3.71297878e-02f,  0.00000000e+00f}},
-        {{1.06996956e-01f,  7.67615256e-02f, -4.92166307e-02f, -1.29001640e-01f}},
-        {{1.27145671e-01f, -7.63003471e-02f, -3.64353304e-02f, -1.59697510e-01f}},
-        {{8.80919747e-02f,  7.48940670e-02f,  9.08786244e-02f,  6.22527183e-02f}},
-        {{1.57880745e-01f, -7.28755272e-02f,  1.82364187e-01f,  8.74240284e-02f}},
-        {{1.57892225e-01f,  7.28944768e-02f,  1.82363474e-01f, -8.74301086e-02f}},
-        {{8.80892603e-02f, -7.48948724e-02f,  9.08779842e-02f, -6.22480443e-02f}},
-    }}
+    .mOrder = 1,
+    .m3DMode = Periphonic,
+    .mChannels = {FrontLeft, FrontRight, SideLeft, SideRight, BackLeft, BackRight,
+        TopFrontLeft, TopFrontRight, TopBackLeft, TopBackRight },
+    .mScaling = DevAmbiScaling::N3D,
+    .mOrderGain = {1.00000000e+0f, 1.00000000e+0f, 1.00000000e+0f},
+    .mCoeffs = std::to_array<ChannelCoeffs>({
+        {1.27149251e-01f,  7.63047539e-02f, -3.64373750e-02f,  1.59700680e-01f},
+        {1.07005418e-01f, -7.67638760e-02f, -4.92129762e-02f,  1.29012797e-01f},
+        {1.26400196e-01f,  1.77494694e-01f, -3.71203389e-02f,  0.00000000e+00f},
+        {1.26396516e-01f, -1.77488059e-01f, -3.71297878e-02f,  0.00000000e+00f},
+        {1.06996956e-01f,  7.67615256e-02f, -4.92166307e-02f, -1.29001640e-01f},
+        {1.27145671e-01f, -7.63003471e-02f, -3.64353304e-02f, -1.59697510e-01f},
+        {8.80919747e-02f,  7.48940670e-02f,  9.08786244e-02f,  6.22527183e-02f},
+        {1.57880745e-01f, -7.28755272e-02f,  1.82364187e-01f,  8.74240284e-02f},
+        {1.57892225e-01f,  7.28944768e-02f,  1.82363474e-01f, -8.74301086e-02f},
+        {8.80892603e-02f, -7.48948724e-02f,  9.08779842e-02f, -6.22480443e-02f},
+    })
 };
 constexpr auto X7144Config = DecoderConfig<DualBand, 14>{
-    1_u8, Periphonic,
-    {{BackLeft, SideLeft, FrontLeft, FrontRight, SideRight, BackRight, TopBackLeft, TopFrontLeft,
-        TopFrontRight, TopBackRight, BottomBackLeft, BottomFrontLeft, BottomFrontRight,
-        BottomBackRight}},
-    DevAmbiScaling::N3D,
-    /*HF*/{{2.64575131e+0f, 1.52752523e+0f}},
-    {{
-        {{7.14285714e-02f,  5.09426708e-02f,  0.00000000e+00f, -8.82352941e-02f}},
-        {{7.14285714e-02f,  1.01885342e-01f,  0.00000000e+00f,  0.00000000e+00f}},
-        {{7.14285714e-02f,  5.09426708e-02f,  0.00000000e+00f,  8.82352941e-02f}},
-        {{7.14285714e-02f, -5.09426708e-02f,  0.00000000e+00f,  8.82352941e-02f}},
-        {{7.14285714e-02f, -1.01885342e-01f,  0.00000000e+00f,  0.00000000e+00f}},
-        {{7.14285714e-02f, -5.09426708e-02f,  0.00000000e+00f, -8.82352941e-02f}},
-        {{7.14285714e-02f,  5.88235294e-02f,  1.25000000e-01f, -5.88235294e-02f}},
-        {{7.14285714e-02f,  5.88235294e-02f,  1.25000000e-01f,  5.88235294e-02f}},
-        {{7.14285714e-02f, -5.88235294e-02f,  1.25000000e-01f,  5.88235294e-02f}},
-        {{7.14285714e-02f, -5.88235294e-02f,  1.25000000e-01f, -5.88235294e-02f}},
-        {{7.14285714e-02f,  5.88235294e-02f, -1.25000000e-01f, -5.88235294e-02f}},
-        {{7.14285714e-02f,  5.88235294e-02f, -1.25000000e-01f,  5.88235294e-02f}},
-        {{7.14285714e-02f, -5.88235294e-02f, -1.25000000e-01f,  5.88235294e-02f}},
-        {{7.14285714e-02f, -5.88235294e-02f, -1.25000000e-01f, -5.88235294e-02f}},
-    }},
-    /*LF*/{{1.00000000e+0f, 1.00000000e+0f}},
-    {{
-        {{7.14285714e-02f,  5.09426708e-02f,  0.00000000e+00f, -8.82352941e-02f}},
-        {{7.14285714e-02f,  1.01885342e-01f,  0.00000000e+00f,  0.00000000e+00f}},
-        {{7.14285714e-02f,  5.09426708e-02f,  0.00000000e+00f,  8.82352941e-02f}},
-        {{7.14285714e-02f, -5.09426708e-02f,  0.00000000e+00f,  8.82352941e-02f}},
-        {{7.14285714e-02f, -1.01885342e-01f,  0.00000000e+00f,  0.00000000e+00f}},
-        {{7.14285714e-02f, -5.09426708e-02f,  0.00000000e+00f, -8.82352941e-02f}},
-        {{7.14285714e-02f,  5.88235294e-02f,  1.25000000e-01f, -5.88235294e-02f}},
-        {{7.14285714e-02f,  5.88235294e-02f,  1.25000000e-01f,  5.88235294e-02f}},
-        {{7.14285714e-02f, -5.88235294e-02f,  1.25000000e-01f,  5.88235294e-02f}},
-        {{7.14285714e-02f, -5.88235294e-02f,  1.25000000e-01f, -5.88235294e-02f}},
-        {{7.14285714e-02f,  5.88235294e-02f, -1.25000000e-01f, -5.88235294e-02f}},
-        {{7.14285714e-02f,  5.88235294e-02f, -1.25000000e-01f,  5.88235294e-02f}},
-        {{7.14285714e-02f, -5.88235294e-02f, -1.25000000e-01f,  5.88235294e-02f}},
-        {{7.14285714e-02f, -5.88235294e-02f, -1.25000000e-01f, -5.88235294e-02f}},
-    }}
+    .mOrder = 1,
+    .m3DMode = Periphonic,
+    .mChannels = {BackLeft, SideLeft, FrontLeft, FrontRight, SideRight, BackRight,
+        TopBackLeft, TopFrontLeft, TopFrontRight, TopBackRight,
+        BottomBackLeft, BottomFrontLeft, BottomFrontRight, BottomBackRight},
+    .mScaling = DevAmbiScaling::N3D,
+    .mOrderGainHF = {2.64575131e+0f, 1.52752523e+0f},
+    .mCoeffsHF = std::to_array<ChannelCoeffs>({
+        {7.14285714e-02f,  5.09426708e-02f,  0.00000000e+00f, -8.82352941e-02f},
+        {7.14285714e-02f,  1.01885342e-01f,  0.00000000e+00f,  0.00000000e+00f},
+        {7.14285714e-02f,  5.09426708e-02f,  0.00000000e+00f,  8.82352941e-02f},
+        {7.14285714e-02f, -5.09426708e-02f,  0.00000000e+00f,  8.82352941e-02f},
+        {7.14285714e-02f, -1.01885342e-01f,  0.00000000e+00f,  0.00000000e+00f},
+        {7.14285714e-02f, -5.09426708e-02f,  0.00000000e+00f, -8.82352941e-02f},
+        {7.14285714e-02f,  5.88235294e-02f,  1.25000000e-01f, -5.88235294e-02f},
+        {7.14285714e-02f,  5.88235294e-02f,  1.25000000e-01f,  5.88235294e-02f},
+        {7.14285714e-02f, -5.88235294e-02f,  1.25000000e-01f,  5.88235294e-02f},
+        {7.14285714e-02f, -5.88235294e-02f,  1.25000000e-01f, -5.88235294e-02f},
+        {7.14285714e-02f,  5.88235294e-02f, -1.25000000e-01f, -5.88235294e-02f},
+        {7.14285714e-02f,  5.88235294e-02f, -1.25000000e-01f,  5.88235294e-02f},
+        {7.14285714e-02f, -5.88235294e-02f, -1.25000000e-01f,  5.88235294e-02f},
+        {7.14285714e-02f, -5.88235294e-02f, -1.25000000e-01f, -5.88235294e-02f},
+    }),
+    .mOrderGainLF = {1.00000000e+0f, 1.00000000e+0f},
+    .mCoeffsLF = std::to_array<ChannelCoeffs>({
+        {7.14285714e-02f,  5.09426708e-02f,  0.00000000e+00f, -8.82352941e-02f},
+        {7.14285714e-02f,  1.01885342e-01f,  0.00000000e+00f,  0.00000000e+00f},
+        {7.14285714e-02f,  5.09426708e-02f,  0.00000000e+00f,  8.82352941e-02f},
+        {7.14285714e-02f, -5.09426708e-02f,  0.00000000e+00f,  8.82352941e-02f},
+        {7.14285714e-02f, -1.01885342e-01f,  0.00000000e+00f,  0.00000000e+00f},
+        {7.14285714e-02f, -5.09426708e-02f,  0.00000000e+00f, -8.82352941e-02f},
+        {7.14285714e-02f,  5.88235294e-02f,  1.25000000e-01f, -5.88235294e-02f},
+        {7.14285714e-02f,  5.88235294e-02f,  1.25000000e-01f,  5.88235294e-02f},
+        {7.14285714e-02f, -5.88235294e-02f,  1.25000000e-01f,  5.88235294e-02f},
+        {7.14285714e-02f, -5.88235294e-02f,  1.25000000e-01f, -5.88235294e-02f},
+        {7.14285714e-02f,  5.88235294e-02f, -1.25000000e-01f, -5.88235294e-02f},
+        {7.14285714e-02f,  5.88235294e-02f, -1.25000000e-01f,  5.88235294e-02f},
+        {7.14285714e-02f, -5.88235294e-02f, -1.25000000e-01f,  5.88235294e-02f},
+        {7.14285714e-02f, -5.88235294e-02f, -1.25000000e-01f, -5.88235294e-02f},
+    })
 };
 
 
 struct PanningProc {
-    std::unique_ptr<BFormatDec> decoder;
-    std::unique_ptr<FrontStablizer> stablizer;
+    std::unique_ptr<BFormatDec> decoder{};
+    std::unique_ptr<FrontStablizer> stablizer{};
 };
 
 [[nodiscard]]
@@ -735,8 +757,8 @@ auto InitPanning(al::Device *const device, bool const hqdec=false, bool const st
             const auto n3dscale = GetAmbiScales(device->mAmbiScale);
 
             std::ranges::transform(acnmap, device->Dry.AmbiMap.begin(),
-                [n3dscale](u8 const acn) noexcept -> BFChannelConfig
-            { return BFChannelConfig{1.0f/n3dscale[acn.c_val], acn.c_val}; });
+                [n3dscale](std::uint8_t const acn) noexcept -> BFChannelConfig
+            { return BFChannelConfig{1.0f/n3dscale[acn], acn}; });
             AllocChannels(device, count, 0);
             device->m2DMixing = false;
 
@@ -758,8 +780,8 @@ auto InitPanning(al::Device *const device, bool const hqdec=false, bool const st
     }
 
     const auto ambicount = (decoder.m3DMode == Periphonic)
-        ? AmbiChannelsFromOrder(decoder.mOrder.c_val)
-        : Ambi2DChannelsFromOrder(decoder.mOrder.c_val);
+        ? AmbiChannelsFromOrder(decoder.mOrder)
+        : Ambi2DChannelsFromOrder(decoder.mOrder);
     const auto dual_band = hqdec && !decoder.mCoeffsLF.empty();
     auto chancoeffs = std::vector<ChannelDec>{};
     auto chancoeffslf = std::vector<ChannelDec>{};
@@ -779,20 +801,22 @@ auto InitPanning(al::Device *const device, bool const hqdec=false, bool const st
 
         chancoeffs.resize(std::max(chancoeffs.size(), idx+1_zu), ChannelDec{});
         std::ranges::transform(decoder.mCoeffs[i] | std::views::take(ambicount), ordermap,
-            chancoeffs[idx].begin(), [&decoder](float const coeff, u8 const order) -> float
-        { return coeff * decoder.mOrderGain[order.c_val]; });
+            chancoeffs[idx].begin(),
+            [&decoder](float const coeff, std::uint8_t const order) -> float
+        { return coeff * decoder.mOrderGain[order]; });
 
         if(!dual_band)
             continue;
 
         chancoeffslf.resize(std::max(chancoeffslf.size(), idx+1_zu), ChannelDec{});
         std::ranges::transform(decoder.mCoeffsLF[i] | std::views::take(ambicount), ordermap,
-            chancoeffslf[idx].begin(), [&decoder](float const coeff, u8 const order) -> float
-        { return coeff * decoder.mOrderGainLF[order.c_val]; });
+            chancoeffslf[idx].begin(),
+            [&decoder](float const coeff, std::uint8_t const order) -> float
+        { return coeff * decoder.mOrderGainLF[order]; });
     }
 
     /* For non-DevFmtAmbi3D, set the ambisonic order. */
-    device->mAmbiOrder = decoder.mOrder.c_val;
+    device->mAmbiOrder = decoder.mOrder;
     device->m2DMixing = decoder.m3DMode == Pantaphonic;
 
     const auto acnmap = (decoder.m3DMode == Periphonic)
@@ -800,8 +824,8 @@ auto InitPanning(al::Device *const device, bool const hqdec=false, bool const st
         : std::span{AmbiIndex::FromACN2D}.first(ambicount);
     const auto coeffscale = GetAmbiScales(decoder.mScaling);
     std::ranges::transform(acnmap, device->Dry.AmbiMap.begin(),
-        [coeffscale](u8 const acn) noexcept
-    { return BFChannelConfig{1.0f/coeffscale[acn.c_val], acn.c_val}; });
+        [coeffscale](std::uint8_t const acn) noexcept
+    { return BFChannelConfig{1.0f/coeffscale[acn], acn}; });
     AllocChannels(device, ambicount, device->channelsFromFmt());
 
     auto stablizer = std::unique_ptr<FrontStablizer>{};
@@ -836,7 +860,7 @@ auto InitPanning(al::Device *const device, bool const hqdec=false, bool const st
         (decoder.m3DMode == Periphonic) ? " periphonic" : "");
     auto bformatdec = std::make_unique<BFormatDec>(ambicount, chancoeffs, chancoeffslf,
         device->mXOverFreq/gsl::narrow_cast<float>(device->mSampleRate));
-    return {std::move(bformatdec), std::move(stablizer)};
+    return {.decoder=std::move(bformatdec), .stablizer=std::move(stablizer)};
 }
 
 [[nodiscard]]
@@ -854,180 +878,180 @@ auto InitHrtfPanning(al::Device *const device) -> std::unique_ptr<DirectHrtfStat
     static constexpr auto Deg111 = 1.935660155e+00f /*110~111 degrees*/;
     static constexpr auto Deg122 = 2.124370686e+00f /*121~122 degrees*/;
     static constexpr auto Deg148 = 2.588018295e+00f /*148~149 degrees*/;
-    static constexpr auto AmbiPoints1O = std::array{
-        AngularPoint{EvRadians{ Deg_35}, AzRadians{-Deg_45}},
-        AngularPoint{EvRadians{ Deg_35}, AzRadians{-Deg135}},
-        AngularPoint{EvRadians{ Deg_35}, AzRadians{ Deg_45}},
-        AngularPoint{EvRadians{ Deg_35}, AzRadians{ Deg135}},
-        AngularPoint{EvRadians{-Deg_35}, AzRadians{-Deg_45}},
-        AngularPoint{EvRadians{-Deg_35}, AzRadians{-Deg135}},
-        AngularPoint{EvRadians{-Deg_35}, AzRadians{ Deg_45}},
-        AngularPoint{EvRadians{-Deg_35}, AzRadians{ Deg135}},
+    static constexpr auto AmbiPoints1O = std::to_array<AngularPoint>({
+        {EvRadians{ Deg_35}, AzRadians{-Deg_45}},
+        {EvRadians{ Deg_35}, AzRadians{-Deg135}},
+        {EvRadians{ Deg_35}, AzRadians{ Deg_45}},
+        {EvRadians{ Deg_35}, AzRadians{ Deg135}},
+        {EvRadians{-Deg_35}, AzRadians{-Deg_45}},
+        {EvRadians{-Deg_35}, AzRadians{-Deg135}},
+        {EvRadians{-Deg_35}, AzRadians{ Deg_45}},
+        {EvRadians{-Deg_35}, AzRadians{ Deg135}},
+    });
+    static constexpr auto AmbiPoints2O = std::to_array<AngularPoint>({
+        {EvRadians{-Deg_32}, AzRadians{   0.0f}},
+        {EvRadians{   0.0f}, AzRadians{ Deg_58}},
+        {EvRadians{ Deg_58}, AzRadians{ Deg_90}},
+        {EvRadians{ Deg_32}, AzRadians{   0.0f}},
+        {EvRadians{   0.0f}, AzRadians{ Deg122}},
+        {EvRadians{-Deg_58}, AzRadians{-Deg_90}},
+        {EvRadians{-Deg_32}, AzRadians{ Deg180}},
+        {EvRadians{   0.0f}, AzRadians{-Deg122}},
+        {EvRadians{ Deg_58}, AzRadians{-Deg_90}},
+        {EvRadians{ Deg_32}, AzRadians{ Deg180}},
+        {EvRadians{   0.0f}, AzRadians{-Deg_58}},
+        {EvRadians{-Deg_58}, AzRadians{ Deg_90}},
+    });
+    static constexpr auto AmbiPoints3O = std::to_array<AngularPoint>({
+        {EvRadians{ Deg_69}, AzRadians{-Deg_90}},
+        {EvRadians{ Deg_69}, AzRadians{ Deg_90}},
+        {EvRadians{-Deg_69}, AzRadians{-Deg_90}},
+        {EvRadians{-Deg_69}, AzRadians{ Deg_90}},
+        {EvRadians{   0.0f}, AzRadians{-Deg_69}},
+        {EvRadians{   0.0f}, AzRadians{-Deg111}},
+        {EvRadians{   0.0f}, AzRadians{ Deg_69}},
+        {EvRadians{   0.0f}, AzRadians{ Deg111}},
+        {EvRadians{ Deg_21}, AzRadians{   0.0f}},
+        {EvRadians{ Deg_21}, AzRadians{ Deg180}},
+        {EvRadians{-Deg_21}, AzRadians{   0.0f}},
+        {EvRadians{-Deg_21}, AzRadians{ Deg180}},
+        {EvRadians{ Deg_35}, AzRadians{-Deg_45}},
+        {EvRadians{ Deg_35}, AzRadians{-Deg135}},
+        {EvRadians{ Deg_35}, AzRadians{ Deg_45}},
+        {EvRadians{ Deg_35}, AzRadians{ Deg135}},
+        {EvRadians{-Deg_35}, AzRadians{-Deg_45}},
+        {EvRadians{-Deg_35}, AzRadians{-Deg135}},
+        {EvRadians{-Deg_35}, AzRadians{ Deg_45}},
+        {EvRadians{-Deg_35}, AzRadians{ Deg135}},
+    });
+    static constexpr auto AmbiPoints4O = std::to_array<AngularPoint>({
+        {EvRadians{ Deg_69}, AzRadians{ Deg_90}},
+        {EvRadians{ Deg_69}, AzRadians{-Deg_90}},
+        {EvRadians{ Deg_58}, AzRadians{   0.0f}},
+        {EvRadians{ Deg_58}, AzRadians{ Deg180}},
+        {EvRadians{ Deg_35}, AzRadians{ Deg_45}},
+        {EvRadians{ Deg_35}, AzRadians{ Deg135}},
+        {EvRadians{ Deg_35}, AzRadians{-Deg_45}},
+        {EvRadians{ Deg_35}, AzRadians{-Deg135}},
+        {EvRadians{ Deg_32}, AzRadians{ Deg_90}},
+        {EvRadians{ Deg_32}, AzRadians{-Deg_90}},
+        {EvRadians{ Deg_21}, AzRadians{   0.0f}},
+        {EvRadians{ Deg_21}, AzRadians{ Deg180}},
+        {EvRadians{   0.0f}, AzRadians{ Deg_32}},
+        {EvRadians{   0.0f}, AzRadians{ Deg148}},
+        {EvRadians{   0.0f}, AzRadians{-Deg_32}},
+        {EvRadians{   0.0f}, AzRadians{-Deg148}},
+        {EvRadians{   0.0f}, AzRadians{ Deg_69}},
+        {EvRadians{   0.0f}, AzRadians{-Deg_69}},
+        {EvRadians{   0.0f}, AzRadians{ Deg111}},
+        {EvRadians{   0.0f}, AzRadians{-Deg111}},
+        {EvRadians{-Deg_21}, AzRadians{   0.0f}},
+        {EvRadians{-Deg_21}, AzRadians{ Deg180}},
+        {EvRadians{-Deg_32}, AzRadians{ Deg_90}},
+        {EvRadians{-Deg_32}, AzRadians{-Deg_90}},
+        {EvRadians{-Deg_35}, AzRadians{ Deg_45}},
+        {EvRadians{-Deg_35}, AzRadians{ Deg135}},
+        {EvRadians{-Deg_35}, AzRadians{-Deg_45}},
+        {EvRadians{-Deg_35}, AzRadians{-Deg135}},
+        {EvRadians{-Deg_58}, AzRadians{   0.0f}},
+        {EvRadians{-Deg_58}, AzRadians{ Deg180}},
+        {EvRadians{-Deg_69}, AzRadians{ Deg_90}},
+        {EvRadians{-Deg_69}, AzRadians{-Deg_90}},
+    });
+    static constexpr auto AmbiMatrix1O = std::to_array<ChannelCoeffs>({
+        {1.250000000e-01f,  1.250000000e-01f,  1.250000000e-01f,  1.250000000e-01f},
+        {1.250000000e-01f,  1.250000000e-01f,  1.250000000e-01f, -1.250000000e-01f},
+        {1.250000000e-01f, -1.250000000e-01f,  1.250000000e-01f,  1.250000000e-01f},
+        {1.250000000e-01f, -1.250000000e-01f,  1.250000000e-01f, -1.250000000e-01f},
+        {1.250000000e-01f,  1.250000000e-01f, -1.250000000e-01f,  1.250000000e-01f},
+        {1.250000000e-01f,  1.250000000e-01f, -1.250000000e-01f, -1.250000000e-01f},
+        {1.250000000e-01f, -1.250000000e-01f, -1.250000000e-01f,  1.250000000e-01f},
+        {1.250000000e-01f, -1.250000000e-01f, -1.250000000e-01f, -1.250000000e-01f},
+    });
+    static constexpr auto AmbiMatrix2O = std::to_array<ChannelCoeffs>({
+        {8.333333333e-02f,  0.000000000e+00f, -7.588274978e-02f,  1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f, -1.591525047e-02f, -1.443375673e-01f,  1.167715449e-01f},
+        {8.333333333e-02f, -1.227808683e-01f,  0.000000000e+00f,  7.588274978e-02f, -1.443375673e-01f,  0.000000000e+00f, -9.316949906e-02f,  0.000000000e+00f, -7.216878365e-02f},
+        {8.333333333e-02f, -7.588274978e-02f,  1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f, -1.443375673e-01f,  1.090847495e-01f,  0.000000000e+00f, -4.460276122e-02f},
+        {8.333333333e-02f,  0.000000000e+00f,  7.588274978e-02f,  1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f, -1.591525047e-02f,  1.443375673e-01f,  1.167715449e-01f},
+        {8.333333333e-02f, -1.227808683e-01f,  0.000000000e+00f, -7.588274978e-02f,  1.443375673e-01f,  0.000000000e+00f, -9.316949906e-02f,  0.000000000e+00f, -7.216878365e-02f},
+        {8.333333333e-02f,  7.588274978e-02f, -1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f, -1.443375673e-01f,  1.090847495e-01f,  0.000000000e+00f, -4.460276122e-02f},
+        {8.333333333e-02f,  0.000000000e+00f, -7.588274978e-02f, -1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f, -1.591525047e-02f,  1.443375673e-01f,  1.167715449e-01f},
+        {8.333333333e-02f,  1.227808683e-01f,  0.000000000e+00f, -7.588274978e-02f, -1.443375673e-01f,  0.000000000e+00f, -9.316949906e-02f,  0.000000000e+00f, -7.216878365e-02f},
+        {8.333333333e-02f,  7.588274978e-02f,  1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f,  1.443375673e-01f,  1.090847495e-01f,  0.000000000e+00f, -4.460276122e-02f},
+        {8.333333333e-02f,  0.000000000e+00f,  7.588274978e-02f, -1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f, -1.591525047e-02f, -1.443375673e-01f,  1.167715449e-01f},
+        {8.333333333e-02f,  1.227808683e-01f,  0.000000000e+00f,  7.588274978e-02f,  1.443375673e-01f,  0.000000000e+00f, -9.316949906e-02f,  0.000000000e+00f, -7.216878365e-02f},
+        {8.333333333e-02f, -7.588274978e-02f, -1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f,  1.443375673e-01f,  1.090847495e-01f,  0.000000000e+00f, -4.460276122e-02f},
+    });
+    static constexpr auto AmbiMatrix3O = std::to_array<ChannelCoeffs>({
+        {5.000000000e-02f,  3.090169944e-02f,  8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f,  6.454972244e-02f,  9.045084972e-02f,  0.000000000e+00f, -1.232790000e-02f, -1.256118221e-01f,  0.000000000e+00f,  1.126112056e-01f,  7.944389175e-02f,  0.000000000e+00f,  2.421151497e-02f,  0.000000000e+00f},
+        {5.000000000e-02f, -3.090169944e-02f,  8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f, -6.454972244e-02f,  9.045084972e-02f,  0.000000000e+00f, -1.232790000e-02f,  1.256118221e-01f,  0.000000000e+00f, -1.126112056e-01f,  7.944389175e-02f,  0.000000000e+00f,  2.421151497e-02f,  0.000000000e+00f},
+        {5.000000000e-02f,  3.090169944e-02f, -8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f, -6.454972244e-02f,  9.045084972e-02f,  0.000000000e+00f, -1.232790000e-02f, -1.256118221e-01f,  0.000000000e+00f,  1.126112056e-01f, -7.944389175e-02f,  0.000000000e+00f, -2.421151497e-02f,  0.000000000e+00f},
+        {5.000000000e-02f, -3.090169944e-02f, -8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f,  6.454972244e-02f,  9.045084972e-02f,  0.000000000e+00f, -1.232790000e-02f,  1.256118221e-01f,  0.000000000e+00f, -1.126112056e-01f, -7.944389175e-02f,  0.000000000e+00f, -2.421151497e-02f,  0.000000000e+00f},
+        {5.000000000e-02f,  8.090169944e-02f,  0.000000000e+00f,  3.090169944e-02f,  6.454972244e-02f,  0.000000000e+00f, -5.590169944e-02f,  0.000000000e+00f, -7.216878365e-02f, -7.763237543e-02f,  0.000000000e+00f, -2.950836627e-02f,  0.000000000e+00f, -1.497759251e-01f,  0.000000000e+00f, -7.763237543e-02f},
+        {5.000000000e-02f,  8.090169944e-02f,  0.000000000e+00f, -3.090169944e-02f, -6.454972244e-02f,  0.000000000e+00f, -5.590169944e-02f,  0.000000000e+00f, -7.216878365e-02f, -7.763237543e-02f,  0.000000000e+00f, -2.950836627e-02f,  0.000000000e+00f,  1.497759251e-01f,  0.000000000e+00f,  7.763237543e-02f},
+        {5.000000000e-02f, -8.090169944e-02f,  0.000000000e+00f,  3.090169944e-02f, -6.454972244e-02f,  0.000000000e+00f, -5.590169944e-02f,  0.000000000e+00f, -7.216878365e-02f,  7.763237543e-02f,  0.000000000e+00f,  2.950836627e-02f,  0.000000000e+00f, -1.497759251e-01f,  0.000000000e+00f, -7.763237543e-02f},
+        {5.000000000e-02f, -8.090169944e-02f,  0.000000000e+00f, -3.090169944e-02f,  6.454972244e-02f,  0.000000000e+00f, -5.590169944e-02f,  0.000000000e+00f, -7.216878365e-02f,  7.763237543e-02f,  0.000000000e+00f,  2.950836627e-02f,  0.000000000e+00f,  1.497759251e-01f,  0.000000000e+00f,  7.763237543e-02f},
+        {5.000000000e-02f,  0.000000000e+00f,  3.090169944e-02f,  8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f, -3.454915028e-02f,  6.454972244e-02f,  8.449668365e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  3.034486645e-02f, -6.779013272e-02f,  1.659481923e-01f,  4.797944664e-02f},
+        {5.000000000e-02f,  0.000000000e+00f,  3.090169944e-02f, -8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f, -3.454915028e-02f, -6.454972244e-02f,  8.449668365e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  3.034486645e-02f,  6.779013272e-02f,  1.659481923e-01f, -4.797944664e-02f},
+        {5.000000000e-02f,  0.000000000e+00f, -3.090169944e-02f,  8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f, -3.454915028e-02f, -6.454972244e-02f,  8.449668365e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.034486645e-02f, -6.779013272e-02f, -1.659481923e-01f,  4.797944664e-02f},
+        {5.000000000e-02f,  0.000000000e+00f, -3.090169944e-02f, -8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f, -3.454915028e-02f,  6.454972244e-02f,  8.449668365e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.034486645e-02f,  6.779013272e-02f, -1.659481923e-01f, -4.797944664e-02f},
+        {5.000000000e-02f,  5.000000000e-02f,  5.000000000e-02f,  5.000000000e-02f,  6.454972244e-02f,  6.454972244e-02f,  0.000000000e+00f,  6.454972244e-02f,  0.000000000e+00f,  1.016220987e-01f,  6.338656910e-02f, -1.092600649e-02f, -7.364853795e-02f,  1.011266756e-01f, -7.086833869e-02f, -1.482646439e-02f},
+        {5.000000000e-02f,  5.000000000e-02f,  5.000000000e-02f, -5.000000000e-02f, -6.454972244e-02f,  6.454972244e-02f,  0.000000000e+00f, -6.454972244e-02f,  0.000000000e+00f,  1.016220987e-01f, -6.338656910e-02f, -1.092600649e-02f, -7.364853795e-02f, -1.011266756e-01f, -7.086833869e-02f,  1.482646439e-02f},
+        {5.000000000e-02f, -5.000000000e-02f,  5.000000000e-02f,  5.000000000e-02f, -6.454972244e-02f, -6.454972244e-02f,  0.000000000e+00f,  6.454972244e-02f,  0.000000000e+00f, -1.016220987e-01f, -6.338656910e-02f,  1.092600649e-02f, -7.364853795e-02f,  1.011266756e-01f, -7.086833869e-02f, -1.482646439e-02f},
+        {5.000000000e-02f, -5.000000000e-02f,  5.000000000e-02f, -5.000000000e-02f,  6.454972244e-02f, -6.454972244e-02f,  0.000000000e+00f, -6.454972244e-02f,  0.000000000e+00f, -1.016220987e-01f,  6.338656910e-02f,  1.092600649e-02f, -7.364853795e-02f, -1.011266756e-01f, -7.086833869e-02f,  1.482646439e-02f},
+        {5.000000000e-02f,  5.000000000e-02f, -5.000000000e-02f,  5.000000000e-02f,  6.454972244e-02f, -6.454972244e-02f,  0.000000000e+00f, -6.454972244e-02f,  0.000000000e+00f,  1.016220987e-01f, -6.338656910e-02f, -1.092600649e-02f,  7.364853795e-02f,  1.011266756e-01f,  7.086833869e-02f, -1.482646439e-02f},
+        {5.000000000e-02f,  5.000000000e-02f, -5.000000000e-02f, -5.000000000e-02f, -6.454972244e-02f, -6.454972244e-02f,  0.000000000e+00f,  6.454972244e-02f,  0.000000000e+00f,  1.016220987e-01f,  6.338656910e-02f, -1.092600649e-02f,  7.364853795e-02f, -1.011266756e-01f,  7.086833869e-02f,  1.482646439e-02f},
+        {5.000000000e-02f, -5.000000000e-02f, -5.000000000e-02f,  5.000000000e-02f, -6.454972244e-02f,  6.454972244e-02f,  0.000000000e+00f, -6.454972244e-02f,  0.000000000e+00f, -1.016220987e-01f,  6.338656910e-02f,  1.092600649e-02f,  7.364853795e-02f,  1.011266756e-01f,  7.086833869e-02f, -1.482646439e-02f},
+        {5.000000000e-02f, -5.000000000e-02f, -5.000000000e-02f, -5.000000000e-02f,  6.454972244e-02f,  6.454972244e-02f,  0.000000000e+00f,  6.454972244e-02f,  0.000000000e+00f, -1.016220987e-01f, -6.338656910e-02f,  1.092600649e-02f,  7.364853795e-02f, -1.011266756e-01f,  7.086833869e-02f,  1.482646439e-02f},
+    });
+    static constexpr auto AmbiMatrix4O = std::to_array<ChannelCoeffs>({
+        {3.125000000e-02f, -1.931356215e-02f,  5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f, -4.149625014e-02f,  5.814697482e-02f,  0.000000000e+00f, -7.925078574e-03f,  1.522452112e-03f,  0.000000000e+00f, -6.187332918e-02f,  5.384041069e-02f,  0.000000000e+00f, -2.013501509e-02f,  0.000000000e+00f,  0.000000000e+00f,  8.560063208e-03f,  0.000000000e+00f, -7.899684062e-02f,  4.188014710e-02f,  0.000000000e+00f, -3.506295521e-02f,  0.000000000e+00f,  1.155996975e-03f},
+        {3.125000000e-02f,  1.931356215e-02f,  5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f,  4.149625014e-02f,  5.814697482e-02f,  0.000000000e+00f, -7.925078574e-03f, -1.522452112e-03f,  0.000000000e+00f,  6.187332918e-02f,  5.384041069e-02f,  0.000000000e+00f, -2.013501509e-02f,  0.000000000e+00f,  0.000000000e+00f, -8.560063208e-03f,  0.000000000e+00f,  7.899684062e-02f,  4.188014710e-02f,  0.000000000e+00f, -3.506295521e-02f,  0.000000000e+00f,  1.155996975e-03f},
+        {3.125000000e-02f,  0.000000000e+00f,  4.604282561e-02f,  2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f,  3.895883912e-02f,  5.154913118e-02f,  1.592955758e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  2.095745091e-02f,  6.719846732e-02f,  3.629936978e-02f,  9.158741881e-03f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -4.263013518e-03f,  6.519422195e-02f,  5.608172276e-02f,  2.308412203e-02f,  5.044065618e-03f},
+        {3.125000000e-02f,  0.000000000e+00f,  4.604282561e-02f, -2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f,  3.895883912e-02f, -5.154913118e-02f,  1.592955758e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  2.095745091e-02f, -6.719846732e-02f,  3.629936978e-02f, -9.158741881e-03f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -4.263013518e-03f, -6.519422195e-02f,  5.608172276e-02f, -2.308412203e-02f,  5.044065618e-03f},
+        {3.125000000e-02f, -3.125000000e-02f,  3.125000000e-02f,  3.125000000e-02f, -4.149625014e-02f, -4.149625014e-02f,  0.000000000e+00f,  4.149625014e-02f,  0.000000000e+00f, -2.493065047e-02f, -6.338656910e-02f, -2.043172564e-02f, -3.222123536e-02f,  1.903106711e-02f,  8.858542336e-04f, -2.601559590e-02f,  0.000000000e+00f, -4.482107285e-02f, -4.791574237e-02f,  1.694077318e-02f, -3.750000000e-02f, -1.694077318e-02f,  0.000000000e+00f, -4.482107285e-02f, -3.169328455e-02f},
+        {3.125000000e-02f, -3.125000000e-02f,  3.125000000e-02f, -3.125000000e-02f,  4.149625014e-02f, -4.149625014e-02f,  0.000000000e+00f, -4.149625014e-02f,  0.000000000e+00f, -2.493065047e-02f,  6.338656910e-02f, -2.043172564e-02f, -3.222123536e-02f, -1.903106711e-02f,  8.858542336e-04f,  2.601559590e-02f,  0.000000000e+00f, -4.482107285e-02f,  4.791574237e-02f,  1.694077318e-02f, -3.750000000e-02f,  1.694077318e-02f,  0.000000000e+00f,  4.482107285e-02f, -3.169328455e-02f},
+        {3.125000000e-02f,  3.125000000e-02f,  3.125000000e-02f,  3.125000000e-02f,  4.149625014e-02f,  4.149625014e-02f,  0.000000000e+00f,  4.149625014e-02f,  0.000000000e+00f,  2.493065047e-02f,  6.338656910e-02f,  2.043172564e-02f, -3.222123536e-02f,  1.903106711e-02f,  8.858542336e-04f, -2.601559590e-02f,  0.000000000e+00f,  4.482107285e-02f,  4.791574237e-02f, -1.694077318e-02f, -3.750000000e-02f, -1.694077318e-02f,  0.000000000e+00f, -4.482107285e-02f, -3.169328455e-02f},
+        {3.125000000e-02f,  3.125000000e-02f,  3.125000000e-02f, -3.125000000e-02f, -4.149625014e-02f,  4.149625014e-02f,  0.000000000e+00f, -4.149625014e-02f,  0.000000000e+00f,  2.493065047e-02f, -6.338656910e-02f,  2.043172564e-02f, -3.222123536e-02f, -1.903106711e-02f,  8.858542336e-04f,  2.601559590e-02f,  0.000000000e+00f,  4.482107285e-02f, -4.791574237e-02f, -1.694077318e-02f, -3.750000000e-02f,  1.694077318e-02f,  0.000000000e+00f,  4.482107285e-02f, -3.169328455e-02f},
+        {3.125000000e-02f, -4.604282561e-02f,  2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f, -5.154913118e-02f, -5.684018025e-03f,  0.000000000e+00f, -4.170412317e-02f,  3.879705320e-02f,  0.000000000e+00f, -1.586340627e-02f, -3.390986790e-02f,  0.000000000e+00f, -5.873361407e-02f,  0.000000000e+00f,  0.000000000e+00f,  6.043501607e-02f,  0.000000000e+00f,  3.362695493e-02f, -2.921912934e-02f,  0.000000000e+00f, -3.376029419e-02f,  0.000000000e+00f,  3.457254007e-02f},
+        {3.125000000e-02f,  4.604282561e-02f,  2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f,  5.154913118e-02f, -5.684018025e-03f,  0.000000000e+00f, -4.170412317e-02f, -3.879705320e-02f,  0.000000000e+00f,  1.586340627e-02f, -3.390986790e-02f,  0.000000000e+00f, -5.873361407e-02f,  0.000000000e+00f,  0.000000000e+00f, -6.043501607e-02f,  0.000000000e+00f, -3.362695493e-02f, -2.921912934e-02f,  0.000000000e+00f, -3.376029419e-02f,  0.000000000e+00f,  3.457254007e-02f},
+        {3.125000000e-02f,  0.000000000e+00f,  1.931356215e-02f,  5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f, -2.221016804e-02f,  4.149625014e-02f,  5.431929663e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.668591722e-02f, -1.705225633e-02f,  4.984746936e-02f,  5.489471022e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.040861381e-03f, -5.358568085e-02f, -5.115616222e-03f,  5.867154607e-02f,  5.430725099e-02f},
+        {3.125000000e-02f,  0.000000000e+00f,  1.931356215e-02f, -5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f, -2.221016804e-02f, -4.149625014e-02f,  5.431929663e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.668591722e-02f,  1.705225633e-02f,  4.984746936e-02f, -5.489471022e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.040861381e-03f,  5.358568085e-02f, -5.115616222e-03f, -5.867154607e-02f,  5.430725099e-02f},
+        {3.125000000e-02f, -2.845603117e-02f,  0.000000000e+00f,  4.604282561e-02f, -5.154913118e-02f,  0.000000000e+00f, -3.327482109e-02f,  0.000000000e+00f,  2.577456559e-02f, -6.277495073e-02f,  0.000000000e+00f,  2.566753052e-02f,  0.000000000e+00f, -4.153093679e-02f,  0.000000000e+00f, -5.660413777e-03f, -5.282214092e-02f,  0.000000000e+00f,  4.464285714e-02f,  0.000000000e+00f,  3.348214286e-02f,  0.000000000e+00f, -2.232142857e-02f,  0.000000000e+00f, -3.961660569e-02f},
+        {3.125000000e-02f, -2.845603117e-02f,  0.000000000e+00f, -4.604282561e-02f,  5.154913118e-02f,  0.000000000e+00f, -3.327482109e-02f,  0.000000000e+00f,  2.577456559e-02f, -6.277495073e-02f,  0.000000000e+00f,  2.566753052e-02f,  0.000000000e+00f,  4.153093679e-02f,  0.000000000e+00f,  5.660413777e-03f,  5.282214092e-02f,  0.000000000e+00f, -4.464285714e-02f,  0.000000000e+00f,  3.348214286e-02f,  0.000000000e+00f, -2.232142857e-02f,  0.000000000e+00f, -3.961660569e-02f},
+        {3.125000000e-02f,  2.845603117e-02f,  0.000000000e+00f,  4.604282561e-02f,  5.154913118e-02f,  0.000000000e+00f, -3.327482109e-02f,  0.000000000e+00f,  2.577456559e-02f,  6.277495073e-02f,  0.000000000e+00f, -2.566753052e-02f,  0.000000000e+00f, -4.153093679e-02f,  0.000000000e+00f, -5.660413777e-03f,  5.282214092e-02f,  0.000000000e+00f, -4.464285714e-02f,  0.000000000e+00f,  3.348214286e-02f,  0.000000000e+00f, -2.232142857e-02f,  0.000000000e+00f, -3.961660569e-02f},
+        {3.125000000e-02f,  2.845603117e-02f,  0.000000000e+00f, -4.604282561e-02f, -5.154913118e-02f,  0.000000000e+00f, -3.327482109e-02f,  0.000000000e+00f,  2.577456559e-02f,  6.277495073e-02f,  0.000000000e+00f, -2.566753052e-02f,  0.000000000e+00f,  4.153093679e-02f,  0.000000000e+00f,  5.660413777e-03f, -5.282214092e-02f,  0.000000000e+00f,  4.464285714e-02f,  0.000000000e+00f,  3.348214286e-02f,  0.000000000e+00f, -2.232142857e-02f,  0.000000000e+00f, -3.961660569e-02f},
+        {3.125000000e-02f, -5.056356215e-02f,  0.000000000e+00f,  1.931356215e-02f, -4.149625014e-02f,  0.000000000e+00f, -3.593680678e-02f,  0.000000000e+00f, -4.639421806e-02f,  3.023445375e-02f,  0.000000000e+00f,  4.888851054e-02f,  0.000000000e+00f, -1.694244021e-02f,  0.000000000e+00f, -5.952798034e-02f,  7.086833869e-02f,  0.000000000e+00f,  3.593680678e-02f,  0.000000000e+00f,  3.616071429e-02f,  0.000000000e+00f,  4.017857143e-02f,  0.000000000e+00f,  7.923321138e-03f},
+        {3.125000000e-02f,  5.056356215e-02f,  0.000000000e+00f,  1.931356215e-02f,  4.149625014e-02f,  0.000000000e+00f, -3.593680678e-02f,  0.000000000e+00f, -4.639421806e-02f, -3.023445375e-02f,  0.000000000e+00f, -4.888851054e-02f,  0.000000000e+00f, -1.694244021e-02f,  0.000000000e+00f, -5.952798034e-02f, -7.086833869e-02f,  0.000000000e+00f, -3.593680678e-02f,  0.000000000e+00f,  3.616071429e-02f,  0.000000000e+00f,  4.017857143e-02f,  0.000000000e+00f,  7.923321138e-03f},
+        {3.125000000e-02f, -5.056356215e-02f,  0.000000000e+00f, -1.931356215e-02f,  4.149625014e-02f,  0.000000000e+00f, -3.593680678e-02f,  0.000000000e+00f, -4.639421806e-02f,  3.023445375e-02f,  0.000000000e+00f,  4.888851054e-02f,  0.000000000e+00f,  1.694244021e-02f,  0.000000000e+00f,  5.952798034e-02f, -7.086833869e-02f,  0.000000000e+00f, -3.593680678e-02f,  0.000000000e+00f,  3.616071429e-02f,  0.000000000e+00f,  4.017857143e-02f,  0.000000000e+00f,  7.923321138e-03f},
+        {3.125000000e-02f,  5.056356215e-02f,  0.000000000e+00f, -1.931356215e-02f, -4.149625014e-02f,  0.000000000e+00f, -3.593680678e-02f,  0.000000000e+00f, -4.639421806e-02f, -3.023445375e-02f,  0.000000000e+00f, -4.888851054e-02f,  0.000000000e+00f,  1.694244021e-02f,  0.000000000e+00f,  5.952798034e-02f,  7.086833869e-02f,  0.000000000e+00f,  3.593680678e-02f,  0.000000000e+00f,  3.616071429e-02f,  0.000000000e+00f,  4.017857143e-02f,  0.000000000e+00f,  7.923321138e-03f},
+        {3.125000000e-02f,  0.000000000e+00f, -1.931356215e-02f,  5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f, -2.221016804e-02f, -4.149625014e-02f,  5.431929663e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  3.668591722e-02f, -1.705225633e-02f, -4.984746936e-02f,  5.489471022e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.040861381e-03f,  5.358568085e-02f, -5.115616222e-03f, -5.867154607e-02f,  5.430725099e-02f},
+        {3.125000000e-02f,  0.000000000e+00f, -1.931356215e-02f, -5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f, -2.221016804e-02f,  4.149625014e-02f,  5.431929663e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  3.668591722e-02f,  1.705225633e-02f, -4.984746936e-02f, -5.489471022e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.040861381e-03f, -5.358568085e-02f, -5.115616222e-03f,  5.867154607e-02f,  5.430725099e-02f},
+        {3.125000000e-02f, -4.604282561e-02f, -2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f,  5.154913118e-02f, -5.684018025e-03f,  0.000000000e+00f, -4.170412317e-02f,  3.879705320e-02f,  0.000000000e+00f, -1.586340627e-02f,  3.390986790e-02f,  0.000000000e+00f,  5.873361407e-02f,  0.000000000e+00f,  0.000000000e+00f, -6.043501607e-02f,  0.000000000e+00f, -3.362695493e-02f, -2.921912934e-02f,  0.000000000e+00f, -3.376029419e-02f,  0.000000000e+00f,  3.457254007e-02f},
+        {3.125000000e-02f,  4.604282561e-02f, -2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f, -5.154913118e-02f, -5.684018025e-03f,  0.000000000e+00f, -4.170412317e-02f, -3.879705320e-02f,  0.000000000e+00f,  1.586340627e-02f,  3.390986790e-02f,  0.000000000e+00f,  5.873361407e-02f,  0.000000000e+00f,  0.000000000e+00f,  6.043501607e-02f,  0.000000000e+00f,  3.362695493e-02f, -2.921912934e-02f,  0.000000000e+00f, -3.376029419e-02f,  0.000000000e+00f,  3.457254007e-02f},
+        {3.125000000e-02f, -3.125000000e-02f, -3.125000000e-02f,  3.125000000e-02f, -4.149625014e-02f,  4.149625014e-02f,  0.000000000e+00f, -4.149625014e-02f,  0.000000000e+00f, -2.493065047e-02f,  6.338656910e-02f, -2.043172564e-02f,  3.222123536e-02f,  1.903106711e-02f, -8.858542336e-04f, -2.601559590e-02f,  0.000000000e+00f,  4.482107285e-02f, -4.791574237e-02f, -1.694077318e-02f, -3.750000000e-02f,  1.694077318e-02f,  0.000000000e+00f,  4.482107285e-02f, -3.169328455e-02f},
+        {3.125000000e-02f, -3.125000000e-02f, -3.125000000e-02f, -3.125000000e-02f,  4.149625014e-02f,  4.149625014e-02f,  0.000000000e+00f,  4.149625014e-02f,  0.000000000e+00f, -2.493065047e-02f, -6.338656910e-02f, -2.043172564e-02f,  3.222123536e-02f, -1.903106711e-02f, -8.858542336e-04f,  2.601559590e-02f,  0.000000000e+00f,  4.482107285e-02f,  4.791574237e-02f, -1.694077318e-02f, -3.750000000e-02f, -1.694077318e-02f,  0.000000000e+00f, -4.482107285e-02f, -3.169328455e-02f},
+        {3.125000000e-02f,  3.125000000e-02f, -3.125000000e-02f,  3.125000000e-02f,  4.149625014e-02f, -4.149625014e-02f,  0.000000000e+00f, -4.149625014e-02f,  0.000000000e+00f,  2.493065047e-02f, -6.338656910e-02f,  2.043172564e-02f,  3.222123536e-02f,  1.903106711e-02f, -8.858542336e-04f, -2.601559590e-02f,  0.000000000e+00f, -4.482107285e-02f,  4.791574237e-02f,  1.694077318e-02f, -3.750000000e-02f,  1.694077318e-02f,  0.000000000e+00f,  4.482107285e-02f, -3.169328455e-02f},
+        {3.125000000e-02f,  3.125000000e-02f, -3.125000000e-02f, -3.125000000e-02f, -4.149625014e-02f, -4.149625014e-02f,  0.000000000e+00f,  4.149625014e-02f,  0.000000000e+00f,  2.493065047e-02f,  6.338656910e-02f,  2.043172564e-02f,  3.222123536e-02f, -1.903106711e-02f, -8.858542336e-04f,  2.601559590e-02f,  0.000000000e+00f, -4.482107285e-02f, -4.791574237e-02f,  1.694077318e-02f, -3.750000000e-02f, -1.694077318e-02f,  0.000000000e+00f, -4.482107285e-02f, -3.169328455e-02f},
+        {3.125000000e-02f,  0.000000000e+00f, -4.604282561e-02f,  2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f,  3.895883912e-02f, -5.154913118e-02f,  1.592955758e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -2.095745091e-02f,  6.719846732e-02f, -3.629936978e-02f,  9.158741881e-03f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -4.263013518e-03f, -6.519422195e-02f,  5.608172276e-02f, -2.308412203e-02f,  5.044065618e-03f},
+        {3.125000000e-02f,  0.000000000e+00f, -4.604282561e-02f, -2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f,  3.895883912e-02f,  5.154913118e-02f,  1.592955758e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -2.095745091e-02f, -6.719846732e-02f, -3.629936978e-02f, -9.158741881e-03f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -4.263013518e-03f,  6.519422195e-02f,  5.608172276e-02f,  2.308412203e-02f,  5.044065618e-03f},
+        {3.125000000e-02f, -1.931356215e-02f, -5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f,  4.149625014e-02f,  5.814697482e-02f,  0.000000000e+00f, -7.925078574e-03f,  1.522452112e-03f,  0.000000000e+00f, -6.187332918e-02f, -5.384041069e-02f,  0.000000000e+00f,  2.013501509e-02f,  0.000000000e+00f,  0.000000000e+00f, -8.560063208e-03f,  0.000000000e+00f,  7.899684062e-02f,  4.188014710e-02f,  0.000000000e+00f, -3.506295521e-02f,  0.000000000e+00f,  1.155996975e-03f},
+        {3.125000000e-02f,  1.931356215e-02f, -5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f, -4.149625014e-02f,  5.814697482e-02f,  0.000000000e+00f, -7.925078574e-03f, -1.522452112e-03f,  0.000000000e+00f,  6.187332918e-02f, -5.384041069e-02f,  0.000000000e+00f,  2.013501509e-02f,  0.000000000e+00f,  0.000000000e+00f,  8.560063208e-03f,  0.000000000e+00f, -7.899684062e-02f,  4.188014710e-02f,  0.000000000e+00f, -3.506295521e-02f,  0.000000000e+00f,  1.155996975e-03f},
+    });
+    static auto constexpr AmbiOrderHFGain1O = std::array{
+        /*ENRGY*/ 2.000000000e+00f, 1.154700538e+00f, 1.000000000e+00f, 1.000000000e+00f, 1.000000000e+00f
     };
-    static constexpr auto AmbiPoints2O = std::array{
-        AngularPoint{EvRadians{-Deg_32}, AzRadians{   0.0f}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{ Deg_58}},
-        AngularPoint{EvRadians{ Deg_58}, AzRadians{ Deg_90}},
-        AngularPoint{EvRadians{ Deg_32}, AzRadians{   0.0f}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{ Deg122}},
-        AngularPoint{EvRadians{-Deg_58}, AzRadians{-Deg_90}},
-        AngularPoint{EvRadians{-Deg_32}, AzRadians{ Deg180}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{-Deg122}},
-        AngularPoint{EvRadians{ Deg_58}, AzRadians{-Deg_90}},
-        AngularPoint{EvRadians{ Deg_32}, AzRadians{ Deg180}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{-Deg_58}},
-        AngularPoint{EvRadians{-Deg_58}, AzRadians{ Deg_90}},
+    static auto constexpr AmbiOrderHFGain2O = std::array{
+        /*ENRGY*/ 1.825741858e+00f, 1.414213562e+00f, 7.302967433e-01f, 1.000000000e+00f, 1.000000000e+00f
+        /*AMP   1.000000000e+00f, 7.745966692e-01f, 4.000000000e-01f, 1.000000000e+00f, 1.000000000e+00f*/
+        /*RMS   9.128709292e-01f, 7.071067812e-01f, 3.651483717e-01f, 1.000000000e+00f, 1.000000000e+00f*/
     };
-    static constexpr auto AmbiPoints3O = std::array{
-        AngularPoint{EvRadians{ Deg_69}, AzRadians{-Deg_90}},
-        AngularPoint{EvRadians{ Deg_69}, AzRadians{ Deg_90}},
-        AngularPoint{EvRadians{-Deg_69}, AzRadians{-Deg_90}},
-        AngularPoint{EvRadians{-Deg_69}, AzRadians{ Deg_90}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{-Deg_69}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{-Deg111}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{ Deg_69}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{ Deg111}},
-        AngularPoint{EvRadians{ Deg_21}, AzRadians{   0.0f}},
-        AngularPoint{EvRadians{ Deg_21}, AzRadians{ Deg180}},
-        AngularPoint{EvRadians{-Deg_21}, AzRadians{   0.0f}},
-        AngularPoint{EvRadians{-Deg_21}, AzRadians{ Deg180}},
-        AngularPoint{EvRadians{ Deg_35}, AzRadians{-Deg_45}},
-        AngularPoint{EvRadians{ Deg_35}, AzRadians{-Deg135}},
-        AngularPoint{EvRadians{ Deg_35}, AzRadians{ Deg_45}},
-        AngularPoint{EvRadians{ Deg_35}, AzRadians{ Deg135}},
-        AngularPoint{EvRadians{-Deg_35}, AzRadians{-Deg_45}},
-        AngularPoint{EvRadians{-Deg_35}, AzRadians{-Deg135}},
-        AngularPoint{EvRadians{-Deg_35}, AzRadians{ Deg_45}},
-        AngularPoint{EvRadians{-Deg_35}, AzRadians{ Deg135}},
+    static auto constexpr AmbiOrderHFGain3O = std::array{
+        /*ENRGY 1.865086714e+00f, 1.606093894e+00f, 1.142055301e+00f, 5.683795528e-01f, 1.000000000e+00f*/
+        /*AMP*/ 1.000000000e+00f, 8.611363116e-01f, 6.123336207e-01f, 3.047469850e-01f, 1.000000000e+00f
+        /*RMS   8.340921354e-01f, 7.182670250e-01f, 5.107426573e-01f, 2.541870634e-01f, 1.000000000e+00f*/
     };
-    static constexpr auto AmbiPoints4O = std::array{
-        AngularPoint{EvRadians{ Deg_69}, AzRadians{ Deg_90}},
-        AngularPoint{EvRadians{ Deg_69}, AzRadians{-Deg_90}},
-        AngularPoint{EvRadians{ Deg_58}, AzRadians{   0.0f}},
-        AngularPoint{EvRadians{ Deg_58}, AzRadians{ Deg180}},
-        AngularPoint{EvRadians{ Deg_35}, AzRadians{ Deg_45}},
-        AngularPoint{EvRadians{ Deg_35}, AzRadians{ Deg135}},
-        AngularPoint{EvRadians{ Deg_35}, AzRadians{-Deg_45}},
-        AngularPoint{EvRadians{ Deg_35}, AzRadians{-Deg135}},
-        AngularPoint{EvRadians{ Deg_32}, AzRadians{ Deg_90}},
-        AngularPoint{EvRadians{ Deg_32}, AzRadians{-Deg_90}},
-        AngularPoint{EvRadians{ Deg_21}, AzRadians{   0.0f}},
-        AngularPoint{EvRadians{ Deg_21}, AzRadians{ Deg180}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{ Deg_32}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{ Deg148}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{-Deg_32}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{-Deg148}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{ Deg_69}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{-Deg_69}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{ Deg111}},
-        AngularPoint{EvRadians{   0.0f}, AzRadians{-Deg111}},
-        AngularPoint{EvRadians{-Deg_21}, AzRadians{   0.0f}},
-        AngularPoint{EvRadians{-Deg_21}, AzRadians{ Deg180}},
-        AngularPoint{EvRadians{-Deg_32}, AzRadians{ Deg_90}},
-        AngularPoint{EvRadians{-Deg_32}, AzRadians{-Deg_90}},
-        AngularPoint{EvRadians{-Deg_35}, AzRadians{ Deg_45}},
-        AngularPoint{EvRadians{-Deg_35}, AzRadians{ Deg135}},
-        AngularPoint{EvRadians{-Deg_35}, AzRadians{-Deg_45}},
-        AngularPoint{EvRadians{-Deg_35}, AzRadians{-Deg135}},
-        AngularPoint{EvRadians{-Deg_58}, AzRadians{   0.0f}},
-        AngularPoint{EvRadians{-Deg_58}, AzRadians{ Deg180}},
-        AngularPoint{EvRadians{-Deg_69}, AzRadians{ Deg_90}},
-        AngularPoint{EvRadians{-Deg_69}, AzRadians{-Deg_90}},
-    };
-    static constexpr auto AmbiMatrix1O = std::array{
-        ChannelCoeffs{1.250000000e-01f,  1.250000000e-01f,  1.250000000e-01f,  1.250000000e-01f},
-        ChannelCoeffs{1.250000000e-01f,  1.250000000e-01f,  1.250000000e-01f, -1.250000000e-01f},
-        ChannelCoeffs{1.250000000e-01f, -1.250000000e-01f,  1.250000000e-01f,  1.250000000e-01f},
-        ChannelCoeffs{1.250000000e-01f, -1.250000000e-01f,  1.250000000e-01f, -1.250000000e-01f},
-        ChannelCoeffs{1.250000000e-01f,  1.250000000e-01f, -1.250000000e-01f,  1.250000000e-01f},
-        ChannelCoeffs{1.250000000e-01f,  1.250000000e-01f, -1.250000000e-01f, -1.250000000e-01f},
-        ChannelCoeffs{1.250000000e-01f, -1.250000000e-01f, -1.250000000e-01f,  1.250000000e-01f},
-        ChannelCoeffs{1.250000000e-01f, -1.250000000e-01f, -1.250000000e-01f, -1.250000000e-01f},
-    };
-    static constexpr auto AmbiMatrix2O = std::array{
-        ChannelCoeffs{8.333333333e-02f,  0.000000000e+00f, -7.588274978e-02f,  1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f, -1.591525047e-02f, -1.443375673e-01f,  1.167715449e-01f},
-        ChannelCoeffs{8.333333333e-02f, -1.227808683e-01f,  0.000000000e+00f,  7.588274978e-02f, -1.443375673e-01f,  0.000000000e+00f, -9.316949906e-02f,  0.000000000e+00f, -7.216878365e-02f},
-        ChannelCoeffs{8.333333333e-02f, -7.588274978e-02f,  1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f, -1.443375673e-01f,  1.090847495e-01f,  0.000000000e+00f, -4.460276122e-02f},
-        ChannelCoeffs{8.333333333e-02f,  0.000000000e+00f,  7.588274978e-02f,  1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f, -1.591525047e-02f,  1.443375673e-01f,  1.167715449e-01f},
-        ChannelCoeffs{8.333333333e-02f, -1.227808683e-01f,  0.000000000e+00f, -7.588274978e-02f,  1.443375673e-01f,  0.000000000e+00f, -9.316949906e-02f,  0.000000000e+00f, -7.216878365e-02f},
-        ChannelCoeffs{8.333333333e-02f,  7.588274978e-02f, -1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f, -1.443375673e-01f,  1.090847495e-01f,  0.000000000e+00f, -4.460276122e-02f},
-        ChannelCoeffs{8.333333333e-02f,  0.000000000e+00f, -7.588274978e-02f, -1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f, -1.591525047e-02f,  1.443375673e-01f,  1.167715449e-01f},
-        ChannelCoeffs{8.333333333e-02f,  1.227808683e-01f,  0.000000000e+00f, -7.588274978e-02f, -1.443375673e-01f,  0.000000000e+00f, -9.316949906e-02f,  0.000000000e+00f, -7.216878365e-02f},
-        ChannelCoeffs{8.333333333e-02f,  7.588274978e-02f,  1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f,  1.443375673e-01f,  1.090847495e-01f,  0.000000000e+00f, -4.460276122e-02f},
-        ChannelCoeffs{8.333333333e-02f,  0.000000000e+00f,  7.588274978e-02f, -1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f, -1.591525047e-02f, -1.443375673e-01f,  1.167715449e-01f},
-        ChannelCoeffs{8.333333333e-02f,  1.227808683e-01f,  0.000000000e+00f,  7.588274978e-02f,  1.443375673e-01f,  0.000000000e+00f, -9.316949906e-02f,  0.000000000e+00f, -7.216878365e-02f},
-        ChannelCoeffs{8.333333333e-02f, -7.588274978e-02f, -1.227808683e-01f,  0.000000000e+00f,  0.000000000e+00f,  1.443375673e-01f,  1.090847495e-01f,  0.000000000e+00f, -4.460276122e-02f},
-    };
-    static constexpr auto AmbiMatrix3O = std::array{
-        ChannelCoeffs{5.000000000e-02f,  3.090169944e-02f,  8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f,  6.454972244e-02f,  9.045084972e-02f,  0.000000000e+00f, -1.232790000e-02f, -1.256118221e-01f,  0.000000000e+00f,  1.126112056e-01f,  7.944389175e-02f,  0.000000000e+00f,  2.421151497e-02f,  0.000000000e+00f},
-        ChannelCoeffs{5.000000000e-02f, -3.090169944e-02f,  8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f, -6.454972244e-02f,  9.045084972e-02f,  0.000000000e+00f, -1.232790000e-02f,  1.256118221e-01f,  0.000000000e+00f, -1.126112056e-01f,  7.944389175e-02f,  0.000000000e+00f,  2.421151497e-02f,  0.000000000e+00f},
-        ChannelCoeffs{5.000000000e-02f,  3.090169944e-02f, -8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f, -6.454972244e-02f,  9.045084972e-02f,  0.000000000e+00f, -1.232790000e-02f, -1.256118221e-01f,  0.000000000e+00f,  1.126112056e-01f, -7.944389175e-02f,  0.000000000e+00f, -2.421151497e-02f,  0.000000000e+00f},
-        ChannelCoeffs{5.000000000e-02f, -3.090169944e-02f, -8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f,  6.454972244e-02f,  9.045084972e-02f,  0.000000000e+00f, -1.232790000e-02f,  1.256118221e-01f,  0.000000000e+00f, -1.126112056e-01f, -7.944389175e-02f,  0.000000000e+00f, -2.421151497e-02f,  0.000000000e+00f},
-        ChannelCoeffs{5.000000000e-02f,  8.090169944e-02f,  0.000000000e+00f,  3.090169944e-02f,  6.454972244e-02f,  0.000000000e+00f, -5.590169944e-02f,  0.000000000e+00f, -7.216878365e-02f, -7.763237543e-02f,  0.000000000e+00f, -2.950836627e-02f,  0.000000000e+00f, -1.497759251e-01f,  0.000000000e+00f, -7.763237543e-02f},
-        ChannelCoeffs{5.000000000e-02f,  8.090169944e-02f,  0.000000000e+00f, -3.090169944e-02f, -6.454972244e-02f,  0.000000000e+00f, -5.590169944e-02f,  0.000000000e+00f, -7.216878365e-02f, -7.763237543e-02f,  0.000000000e+00f, -2.950836627e-02f,  0.000000000e+00f,  1.497759251e-01f,  0.000000000e+00f,  7.763237543e-02f},
-        ChannelCoeffs{5.000000000e-02f, -8.090169944e-02f,  0.000000000e+00f,  3.090169944e-02f, -6.454972244e-02f,  0.000000000e+00f, -5.590169944e-02f,  0.000000000e+00f, -7.216878365e-02f,  7.763237543e-02f,  0.000000000e+00f,  2.950836627e-02f,  0.000000000e+00f, -1.497759251e-01f,  0.000000000e+00f, -7.763237543e-02f},
-        ChannelCoeffs{5.000000000e-02f, -8.090169944e-02f,  0.000000000e+00f, -3.090169944e-02f,  6.454972244e-02f,  0.000000000e+00f, -5.590169944e-02f,  0.000000000e+00f, -7.216878365e-02f,  7.763237543e-02f,  0.000000000e+00f,  2.950836627e-02f,  0.000000000e+00f,  1.497759251e-01f,  0.000000000e+00f,  7.763237543e-02f},
-        ChannelCoeffs{5.000000000e-02f,  0.000000000e+00f,  3.090169944e-02f,  8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f, -3.454915028e-02f,  6.454972244e-02f,  8.449668365e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  3.034486645e-02f, -6.779013272e-02f,  1.659481923e-01f,  4.797944664e-02f},
-        ChannelCoeffs{5.000000000e-02f,  0.000000000e+00f,  3.090169944e-02f, -8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f, -3.454915028e-02f, -6.454972244e-02f,  8.449668365e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  3.034486645e-02f,  6.779013272e-02f,  1.659481923e-01f, -4.797944664e-02f},
-        ChannelCoeffs{5.000000000e-02f,  0.000000000e+00f, -3.090169944e-02f,  8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f, -3.454915028e-02f, -6.454972244e-02f,  8.449668365e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.034486645e-02f, -6.779013272e-02f, -1.659481923e-01f,  4.797944664e-02f},
-        ChannelCoeffs{5.000000000e-02f,  0.000000000e+00f, -3.090169944e-02f, -8.090169944e-02f,  0.000000000e+00f,  0.000000000e+00f, -3.454915028e-02f,  6.454972244e-02f,  8.449668365e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.034486645e-02f,  6.779013272e-02f, -1.659481923e-01f, -4.797944664e-02f},
-        ChannelCoeffs{5.000000000e-02f,  5.000000000e-02f,  5.000000000e-02f,  5.000000000e-02f,  6.454972244e-02f,  6.454972244e-02f,  0.000000000e+00f,  6.454972244e-02f,  0.000000000e+00f,  1.016220987e-01f,  6.338656910e-02f, -1.092600649e-02f, -7.364853795e-02f,  1.011266756e-01f, -7.086833869e-02f, -1.482646439e-02f},
-        ChannelCoeffs{5.000000000e-02f,  5.000000000e-02f,  5.000000000e-02f, -5.000000000e-02f, -6.454972244e-02f,  6.454972244e-02f,  0.000000000e+00f, -6.454972244e-02f,  0.000000000e+00f,  1.016220987e-01f, -6.338656910e-02f, -1.092600649e-02f, -7.364853795e-02f, -1.011266756e-01f, -7.086833869e-02f,  1.482646439e-02f},
-        ChannelCoeffs{5.000000000e-02f, -5.000000000e-02f,  5.000000000e-02f,  5.000000000e-02f, -6.454972244e-02f, -6.454972244e-02f,  0.000000000e+00f,  6.454972244e-02f,  0.000000000e+00f, -1.016220987e-01f, -6.338656910e-02f,  1.092600649e-02f, -7.364853795e-02f,  1.011266756e-01f, -7.086833869e-02f, -1.482646439e-02f},
-        ChannelCoeffs{5.000000000e-02f, -5.000000000e-02f,  5.000000000e-02f, -5.000000000e-02f,  6.454972244e-02f, -6.454972244e-02f,  0.000000000e+00f, -6.454972244e-02f,  0.000000000e+00f, -1.016220987e-01f,  6.338656910e-02f,  1.092600649e-02f, -7.364853795e-02f, -1.011266756e-01f, -7.086833869e-02f,  1.482646439e-02f},
-        ChannelCoeffs{5.000000000e-02f,  5.000000000e-02f, -5.000000000e-02f,  5.000000000e-02f,  6.454972244e-02f, -6.454972244e-02f,  0.000000000e+00f, -6.454972244e-02f,  0.000000000e+00f,  1.016220987e-01f, -6.338656910e-02f, -1.092600649e-02f,  7.364853795e-02f,  1.011266756e-01f,  7.086833869e-02f, -1.482646439e-02f},
-        ChannelCoeffs{5.000000000e-02f,  5.000000000e-02f, -5.000000000e-02f, -5.000000000e-02f, -6.454972244e-02f, -6.454972244e-02f,  0.000000000e+00f,  6.454972244e-02f,  0.000000000e+00f,  1.016220987e-01f,  6.338656910e-02f, -1.092600649e-02f,  7.364853795e-02f, -1.011266756e-01f,  7.086833869e-02f,  1.482646439e-02f},
-        ChannelCoeffs{5.000000000e-02f, -5.000000000e-02f, -5.000000000e-02f,  5.000000000e-02f, -6.454972244e-02f,  6.454972244e-02f,  0.000000000e+00f, -6.454972244e-02f,  0.000000000e+00f, -1.016220987e-01f,  6.338656910e-02f,  1.092600649e-02f,  7.364853795e-02f,  1.011266756e-01f,  7.086833869e-02f, -1.482646439e-02f},
-        ChannelCoeffs{5.000000000e-02f, -5.000000000e-02f, -5.000000000e-02f, -5.000000000e-02f,  6.454972244e-02f,  6.454972244e-02f,  0.000000000e+00f,  6.454972244e-02f,  0.000000000e+00f, -1.016220987e-01f, -6.338656910e-02f,  1.092600649e-02f,  7.364853795e-02f, -1.011266756e-01f,  7.086833869e-02f,  1.482646439e-02f},
-    };
-    static constexpr auto AmbiMatrix4O = std::array{
-        ChannelCoeffs{3.125000000e-02f, -1.931356215e-02f,  5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f, -4.149625014e-02f,  5.814697482e-02f,  0.000000000e+00f, -7.925078574e-03f,  1.522452112e-03f,  0.000000000e+00f, -6.187332918e-02f,  5.384041069e-02f,  0.000000000e+00f, -2.013501509e-02f,  0.000000000e+00f,  0.000000000e+00f,  8.560063208e-03f,  0.000000000e+00f, -7.899684062e-02f,  4.188014710e-02f,  0.000000000e+00f, -3.506295521e-02f,  0.000000000e+00f,  1.155996975e-03f},
-        ChannelCoeffs{3.125000000e-02f,  1.931356215e-02f,  5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f,  4.149625014e-02f,  5.814697482e-02f,  0.000000000e+00f, -7.925078574e-03f, -1.522452112e-03f,  0.000000000e+00f,  6.187332918e-02f,  5.384041069e-02f,  0.000000000e+00f, -2.013501509e-02f,  0.000000000e+00f,  0.000000000e+00f, -8.560063208e-03f,  0.000000000e+00f,  7.899684062e-02f,  4.188014710e-02f,  0.000000000e+00f, -3.506295521e-02f,  0.000000000e+00f,  1.155996975e-03f},
-        ChannelCoeffs{3.125000000e-02f,  0.000000000e+00f,  4.604282561e-02f,  2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f,  3.895883912e-02f,  5.154913118e-02f,  1.592955758e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  2.095745091e-02f,  6.719846732e-02f,  3.629936978e-02f,  9.158741881e-03f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -4.263013518e-03f,  6.519422195e-02f,  5.608172276e-02f,  2.308412203e-02f,  5.044065618e-03f},
-        ChannelCoeffs{3.125000000e-02f,  0.000000000e+00f,  4.604282561e-02f, -2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f,  3.895883912e-02f, -5.154913118e-02f,  1.592955758e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  2.095745091e-02f, -6.719846732e-02f,  3.629936978e-02f, -9.158741881e-03f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -4.263013518e-03f, -6.519422195e-02f,  5.608172276e-02f, -2.308412203e-02f,  5.044065618e-03f},
-        ChannelCoeffs{3.125000000e-02f, -3.125000000e-02f,  3.125000000e-02f,  3.125000000e-02f, -4.149625014e-02f, -4.149625014e-02f,  0.000000000e+00f,  4.149625014e-02f,  0.000000000e+00f, -2.493065047e-02f, -6.338656910e-02f, -2.043172564e-02f, -3.222123536e-02f,  1.903106711e-02f,  8.858542336e-04f, -2.601559590e-02f,  0.000000000e+00f, -4.482107285e-02f, -4.791574237e-02f,  1.694077318e-02f, -3.750000000e-02f, -1.694077318e-02f,  0.000000000e+00f, -4.482107285e-02f, -3.169328455e-02f},
-        ChannelCoeffs{3.125000000e-02f, -3.125000000e-02f,  3.125000000e-02f, -3.125000000e-02f,  4.149625014e-02f, -4.149625014e-02f,  0.000000000e+00f, -4.149625014e-02f,  0.000000000e+00f, -2.493065047e-02f,  6.338656910e-02f, -2.043172564e-02f, -3.222123536e-02f, -1.903106711e-02f,  8.858542336e-04f,  2.601559590e-02f,  0.000000000e+00f, -4.482107285e-02f,  4.791574237e-02f,  1.694077318e-02f, -3.750000000e-02f,  1.694077318e-02f,  0.000000000e+00f,  4.482107285e-02f, -3.169328455e-02f},
-        ChannelCoeffs{3.125000000e-02f,  3.125000000e-02f,  3.125000000e-02f,  3.125000000e-02f,  4.149625014e-02f,  4.149625014e-02f,  0.000000000e+00f,  4.149625014e-02f,  0.000000000e+00f,  2.493065047e-02f,  6.338656910e-02f,  2.043172564e-02f, -3.222123536e-02f,  1.903106711e-02f,  8.858542336e-04f, -2.601559590e-02f,  0.000000000e+00f,  4.482107285e-02f,  4.791574237e-02f, -1.694077318e-02f, -3.750000000e-02f, -1.694077318e-02f,  0.000000000e+00f, -4.482107285e-02f, -3.169328455e-02f},
-        ChannelCoeffs{3.125000000e-02f,  3.125000000e-02f,  3.125000000e-02f, -3.125000000e-02f, -4.149625014e-02f,  4.149625014e-02f,  0.000000000e+00f, -4.149625014e-02f,  0.000000000e+00f,  2.493065047e-02f, -6.338656910e-02f,  2.043172564e-02f, -3.222123536e-02f, -1.903106711e-02f,  8.858542336e-04f,  2.601559590e-02f,  0.000000000e+00f,  4.482107285e-02f, -4.791574237e-02f, -1.694077318e-02f, -3.750000000e-02f,  1.694077318e-02f,  0.000000000e+00f,  4.482107285e-02f, -3.169328455e-02f},
-        ChannelCoeffs{3.125000000e-02f, -4.604282561e-02f,  2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f, -5.154913118e-02f, -5.684018025e-03f,  0.000000000e+00f, -4.170412317e-02f,  3.879705320e-02f,  0.000000000e+00f, -1.586340627e-02f, -3.390986790e-02f,  0.000000000e+00f, -5.873361407e-02f,  0.000000000e+00f,  0.000000000e+00f,  6.043501607e-02f,  0.000000000e+00f,  3.362695493e-02f, -2.921912934e-02f,  0.000000000e+00f, -3.376029419e-02f,  0.000000000e+00f,  3.457254007e-02f},
-        ChannelCoeffs{3.125000000e-02f,  4.604282561e-02f,  2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f,  5.154913118e-02f, -5.684018025e-03f,  0.000000000e+00f, -4.170412317e-02f, -3.879705320e-02f,  0.000000000e+00f,  1.586340627e-02f, -3.390986790e-02f,  0.000000000e+00f, -5.873361407e-02f,  0.000000000e+00f,  0.000000000e+00f, -6.043501607e-02f,  0.000000000e+00f, -3.362695493e-02f, -2.921912934e-02f,  0.000000000e+00f, -3.376029419e-02f,  0.000000000e+00f,  3.457254007e-02f},
-        ChannelCoeffs{3.125000000e-02f,  0.000000000e+00f,  1.931356215e-02f,  5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f, -2.221016804e-02f,  4.149625014e-02f,  5.431929663e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.668591722e-02f, -1.705225633e-02f,  4.984746936e-02f,  5.489471022e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.040861381e-03f, -5.358568085e-02f, -5.115616222e-03f,  5.867154607e-02f,  5.430725099e-02f},
-        ChannelCoeffs{3.125000000e-02f,  0.000000000e+00f,  1.931356215e-02f, -5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f, -2.221016804e-02f, -4.149625014e-02f,  5.431929663e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.668591722e-02f,  1.705225633e-02f,  4.984746936e-02f, -5.489471022e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.040861381e-03f,  5.358568085e-02f, -5.115616222e-03f, -5.867154607e-02f,  5.430725099e-02f},
-        ChannelCoeffs{3.125000000e-02f, -2.845603117e-02f,  0.000000000e+00f,  4.604282561e-02f, -5.154913118e-02f,  0.000000000e+00f, -3.327482109e-02f,  0.000000000e+00f,  2.577456559e-02f, -6.277495073e-02f,  0.000000000e+00f,  2.566753052e-02f,  0.000000000e+00f, -4.153093679e-02f,  0.000000000e+00f, -5.660413777e-03f, -5.282214092e-02f,  0.000000000e+00f,  4.464285714e-02f,  0.000000000e+00f,  3.348214286e-02f,  0.000000000e+00f, -2.232142857e-02f,  0.000000000e+00f, -3.961660569e-02f},
-        ChannelCoeffs{3.125000000e-02f, -2.845603117e-02f,  0.000000000e+00f, -4.604282561e-02f,  5.154913118e-02f,  0.000000000e+00f, -3.327482109e-02f,  0.000000000e+00f,  2.577456559e-02f, -6.277495073e-02f,  0.000000000e+00f,  2.566753052e-02f,  0.000000000e+00f,  4.153093679e-02f,  0.000000000e+00f,  5.660413777e-03f,  5.282214092e-02f,  0.000000000e+00f, -4.464285714e-02f,  0.000000000e+00f,  3.348214286e-02f,  0.000000000e+00f, -2.232142857e-02f,  0.000000000e+00f, -3.961660569e-02f},
-        ChannelCoeffs{3.125000000e-02f,  2.845603117e-02f,  0.000000000e+00f,  4.604282561e-02f,  5.154913118e-02f,  0.000000000e+00f, -3.327482109e-02f,  0.000000000e+00f,  2.577456559e-02f,  6.277495073e-02f,  0.000000000e+00f, -2.566753052e-02f,  0.000000000e+00f, -4.153093679e-02f,  0.000000000e+00f, -5.660413777e-03f,  5.282214092e-02f,  0.000000000e+00f, -4.464285714e-02f,  0.000000000e+00f,  3.348214286e-02f,  0.000000000e+00f, -2.232142857e-02f,  0.000000000e+00f, -3.961660569e-02f},
-        ChannelCoeffs{3.125000000e-02f,  2.845603117e-02f,  0.000000000e+00f, -4.604282561e-02f, -5.154913118e-02f,  0.000000000e+00f, -3.327482109e-02f,  0.000000000e+00f,  2.577456559e-02f,  6.277495073e-02f,  0.000000000e+00f, -2.566753052e-02f,  0.000000000e+00f,  4.153093679e-02f,  0.000000000e+00f,  5.660413777e-03f, -5.282214092e-02f,  0.000000000e+00f,  4.464285714e-02f,  0.000000000e+00f,  3.348214286e-02f,  0.000000000e+00f, -2.232142857e-02f,  0.000000000e+00f, -3.961660569e-02f},
-        ChannelCoeffs{3.125000000e-02f, -5.056356215e-02f,  0.000000000e+00f,  1.931356215e-02f, -4.149625014e-02f,  0.000000000e+00f, -3.593680678e-02f,  0.000000000e+00f, -4.639421806e-02f,  3.023445375e-02f,  0.000000000e+00f,  4.888851054e-02f,  0.000000000e+00f, -1.694244021e-02f,  0.000000000e+00f, -5.952798034e-02f,  7.086833869e-02f,  0.000000000e+00f,  3.593680678e-02f,  0.000000000e+00f,  3.616071429e-02f,  0.000000000e+00f,  4.017857143e-02f,  0.000000000e+00f,  7.923321138e-03f},
-        ChannelCoeffs{3.125000000e-02f,  5.056356215e-02f,  0.000000000e+00f,  1.931356215e-02f,  4.149625014e-02f,  0.000000000e+00f, -3.593680678e-02f,  0.000000000e+00f, -4.639421806e-02f, -3.023445375e-02f,  0.000000000e+00f, -4.888851054e-02f,  0.000000000e+00f, -1.694244021e-02f,  0.000000000e+00f, -5.952798034e-02f, -7.086833869e-02f,  0.000000000e+00f, -3.593680678e-02f,  0.000000000e+00f,  3.616071429e-02f,  0.000000000e+00f,  4.017857143e-02f,  0.000000000e+00f,  7.923321138e-03f},
-        ChannelCoeffs{3.125000000e-02f, -5.056356215e-02f,  0.000000000e+00f, -1.931356215e-02f,  4.149625014e-02f,  0.000000000e+00f, -3.593680678e-02f,  0.000000000e+00f, -4.639421806e-02f,  3.023445375e-02f,  0.000000000e+00f,  4.888851054e-02f,  0.000000000e+00f,  1.694244021e-02f,  0.000000000e+00f,  5.952798034e-02f, -7.086833869e-02f,  0.000000000e+00f, -3.593680678e-02f,  0.000000000e+00f,  3.616071429e-02f,  0.000000000e+00f,  4.017857143e-02f,  0.000000000e+00f,  7.923321138e-03f},
-        ChannelCoeffs{3.125000000e-02f,  5.056356215e-02f,  0.000000000e+00f, -1.931356215e-02f, -4.149625014e-02f,  0.000000000e+00f, -3.593680678e-02f,  0.000000000e+00f, -4.639421806e-02f, -3.023445375e-02f,  0.000000000e+00f, -4.888851054e-02f,  0.000000000e+00f,  1.694244021e-02f,  0.000000000e+00f,  5.952798034e-02f,  7.086833869e-02f,  0.000000000e+00f,  3.593680678e-02f,  0.000000000e+00f,  3.616071429e-02f,  0.000000000e+00f,  4.017857143e-02f,  0.000000000e+00f,  7.923321138e-03f},
-        ChannelCoeffs{3.125000000e-02f,  0.000000000e+00f, -1.931356215e-02f,  5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f, -2.221016804e-02f, -4.149625014e-02f,  5.431929663e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  3.668591722e-02f, -1.705225633e-02f, -4.984746936e-02f,  5.489471022e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.040861381e-03f,  5.358568085e-02f, -5.115616222e-03f, -5.867154607e-02f,  5.430725099e-02f},
-        ChannelCoeffs{3.125000000e-02f,  0.000000000e+00f, -1.931356215e-02f, -5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f, -2.221016804e-02f,  4.149625014e-02f,  5.431929663e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  3.668591722e-02f,  1.705225633e-02f, -4.984746936e-02f, -5.489471022e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -3.040861381e-03f, -5.358568085e-02f, -5.115616222e-03f,  5.867154607e-02f,  5.430725099e-02f},
-        ChannelCoeffs{3.125000000e-02f, -4.604282561e-02f, -2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f,  5.154913118e-02f, -5.684018025e-03f,  0.000000000e+00f, -4.170412317e-02f,  3.879705320e-02f,  0.000000000e+00f, -1.586340627e-02f,  3.390986790e-02f,  0.000000000e+00f,  5.873361407e-02f,  0.000000000e+00f,  0.000000000e+00f, -6.043501607e-02f,  0.000000000e+00f, -3.362695493e-02f, -2.921912934e-02f,  0.000000000e+00f, -3.376029419e-02f,  0.000000000e+00f,  3.457254007e-02f},
-        ChannelCoeffs{3.125000000e-02f,  4.604282561e-02f, -2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f, -5.154913118e-02f, -5.684018025e-03f,  0.000000000e+00f, -4.170412317e-02f, -3.879705320e-02f,  0.000000000e+00f,  1.586340627e-02f,  3.390986790e-02f,  0.000000000e+00f,  5.873361407e-02f,  0.000000000e+00f,  0.000000000e+00f,  6.043501607e-02f,  0.000000000e+00f,  3.362695493e-02f, -2.921912934e-02f,  0.000000000e+00f, -3.376029419e-02f,  0.000000000e+00f,  3.457254007e-02f},
-        ChannelCoeffs{3.125000000e-02f, -3.125000000e-02f, -3.125000000e-02f,  3.125000000e-02f, -4.149625014e-02f,  4.149625014e-02f,  0.000000000e+00f, -4.149625014e-02f,  0.000000000e+00f, -2.493065047e-02f,  6.338656910e-02f, -2.043172564e-02f,  3.222123536e-02f,  1.903106711e-02f, -8.858542336e-04f, -2.601559590e-02f,  0.000000000e+00f,  4.482107285e-02f, -4.791574237e-02f, -1.694077318e-02f, -3.750000000e-02f,  1.694077318e-02f,  0.000000000e+00f,  4.482107285e-02f, -3.169328455e-02f},
-        ChannelCoeffs{3.125000000e-02f, -3.125000000e-02f, -3.125000000e-02f, -3.125000000e-02f,  4.149625014e-02f,  4.149625014e-02f,  0.000000000e+00f,  4.149625014e-02f,  0.000000000e+00f, -2.493065047e-02f, -6.338656910e-02f, -2.043172564e-02f,  3.222123536e-02f, -1.903106711e-02f, -8.858542336e-04f,  2.601559590e-02f,  0.000000000e+00f,  4.482107285e-02f,  4.791574237e-02f, -1.694077318e-02f, -3.750000000e-02f, -1.694077318e-02f,  0.000000000e+00f, -4.482107285e-02f, -3.169328455e-02f},
-        ChannelCoeffs{3.125000000e-02f,  3.125000000e-02f, -3.125000000e-02f,  3.125000000e-02f,  4.149625014e-02f, -4.149625014e-02f,  0.000000000e+00f, -4.149625014e-02f,  0.000000000e+00f,  2.493065047e-02f, -6.338656910e-02f,  2.043172564e-02f,  3.222123536e-02f,  1.903106711e-02f, -8.858542336e-04f, -2.601559590e-02f,  0.000000000e+00f, -4.482107285e-02f,  4.791574237e-02f,  1.694077318e-02f, -3.750000000e-02f,  1.694077318e-02f,  0.000000000e+00f,  4.482107285e-02f, -3.169328455e-02f},
-        ChannelCoeffs{3.125000000e-02f,  3.125000000e-02f, -3.125000000e-02f, -3.125000000e-02f, -4.149625014e-02f, -4.149625014e-02f,  0.000000000e+00f,  4.149625014e-02f,  0.000000000e+00f,  2.493065047e-02f,  6.338656910e-02f,  2.043172564e-02f,  3.222123536e-02f, -1.903106711e-02f, -8.858542336e-04f,  2.601559590e-02f,  0.000000000e+00f, -4.482107285e-02f, -4.791574237e-02f,  1.694077318e-02f, -3.750000000e-02f, -1.694077318e-02f,  0.000000000e+00f, -4.482107285e-02f, -3.169328455e-02f},
-        ChannelCoeffs{3.125000000e-02f,  0.000000000e+00f, -4.604282561e-02f,  2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f,  3.895883912e-02f, -5.154913118e-02f,  1.592955758e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -2.095745091e-02f,  6.719846732e-02f, -3.629936978e-02f,  9.158741881e-03f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -4.263013518e-03f, -6.519422195e-02f,  5.608172276e-02f, -2.308412203e-02f,  5.044065618e-03f},
-        ChannelCoeffs{3.125000000e-02f,  0.000000000e+00f, -4.604282561e-02f, -2.845603117e-02f,  0.000000000e+00f,  0.000000000e+00f,  3.895883912e-02f,  5.154913118e-02f,  1.592955758e-02f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -2.095745091e-02f, -6.719846732e-02f, -3.629936978e-02f, -9.158741881e-03f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f,  0.000000000e+00f, -4.263013518e-03f,  6.519422195e-02f,  5.608172276e-02f,  2.308412203e-02f,  5.044065618e-03f},
-        ChannelCoeffs{3.125000000e-02f, -1.931356215e-02f, -5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f,  4.149625014e-02f,  5.814697482e-02f,  0.000000000e+00f, -7.925078574e-03f,  1.522452112e-03f,  0.000000000e+00f, -6.187332918e-02f, -5.384041069e-02f,  0.000000000e+00f,  2.013501509e-02f,  0.000000000e+00f,  0.000000000e+00f, -8.560063208e-03f,  0.000000000e+00f,  7.899684062e-02f,  4.188014710e-02f,  0.000000000e+00f, -3.506295521e-02f,  0.000000000e+00f,  1.155996975e-03f},
-        ChannelCoeffs{3.125000000e-02f,  1.931356215e-02f, -5.056356215e-02f,  0.000000000e+00f,  0.000000000e+00f, -4.149625014e-02f,  5.814697482e-02f,  0.000000000e+00f, -7.925078574e-03f, -1.522452112e-03f,  0.000000000e+00f,  6.187332918e-02f, -5.384041069e-02f,  0.000000000e+00f,  2.013501509e-02f,  0.000000000e+00f,  0.000000000e+00f,  8.560063208e-03f,  0.000000000e+00f, -7.899684062e-02f,  4.188014710e-02f,  0.000000000e+00f, -3.506295521e-02f,  0.000000000e+00f,  1.155996975e-03f},
-    };
-    static constexpr std::array<float, MaxAmbiOrder+1> AmbiOrderHFGain1O{
-        /*ENRGY*/ 2.000000000e+00f, 1.154700538e+00f
-    };
-    static constexpr std::array<float, MaxAmbiOrder+1> AmbiOrderHFGain2O{
-        /*ENRGY*/ 1.825741858e+00f, 1.414213562e+00f, 7.302967433e-01f
-        /*AMP   1.000000000e+00f, 7.745966692e-01f, 4.000000000e-01f*/
-        /*RMS   9.128709292e-01f, 7.071067812e-01f, 3.651483717e-01f*/
-    };
-    static constexpr std::array<float, MaxAmbiOrder+1> AmbiOrderHFGain3O{
-        /*ENRGY 1.865086714e+00f, 1.606093894e+00f, 1.142055301e+00f, 5.683795528e-01f*/
-        /*AMP*/ 1.000000000e+00f, 8.611363116e-01f, 6.123336207e-01f, 3.047469850e-01f
-        /*RMS   8.340921354e-01f, 7.182670250e-01f, 5.107426573e-01f, 2.541870634e-01f*/
-    };
-    static constexpr std::array<float, MaxAmbiOrder+1> AmbiOrderHFGain4O{
+    static auto constexpr AmbiOrderHFGain4O = std::array{
         /*ENRGY 1.947005434e+00f, 1.764337084e+00f, 1.424707344e+00f, 9.755104127e-01f, 4.784482742e-01f*/
         /*AMP*/ 1.000000000e+00f, 9.061798459e-01f, 7.317428698e-01f, 5.010311710e-01f, 2.457354591e-01f
         /*RMS   7.696214736e-01f, 6.974154684e-01f, 5.631650257e-01f, 3.856043482e-01f, 1.891232861e-01f*/
@@ -1055,31 +1079,31 @@ auto InitHrtfPanning(al::Device *const device) -> std::unique_ptr<DirectHrtfStat
      * and it eases the CPU/memory load.
      */
     device->mRenderMode = RenderMode::Hrtf;
-    auto ambi_order = 1_u8;
+    auto ambi_order = std::uint8_t{1};
     if(auto modeopt = device->configValue<std::string>({}, "hrtf-mode"))
     {
         struct HrtfModeEntry {
             std::string_view name;
             RenderMode mode;
-            u8 order;
+            std::uint8_t order;
         };
-        constexpr auto hrtf_modes = std::array{
-            HrtfModeEntry{"full"sv, RenderMode::Hrtf, 1_u8},
-            HrtfModeEntry{"ambi1"sv, RenderMode::Normal, 1_u8},
-            HrtfModeEntry{"ambi2"sv, RenderMode::Normal, 2_u8},
-            HrtfModeEntry{"ambi3"sv, RenderMode::Normal, 3_u8},
-            HrtfModeEntry{"ambi4"sv, RenderMode::Normal, 4_u8},
-        };
+        auto constexpr hrtf_modes = std::to_array<HrtfModeEntry>({
+            {.name="full"sv, .mode=RenderMode::Hrtf, .order=1},
+            {.name="ambi1"sv, .mode=RenderMode::Normal, .order=1},
+            {.name="ambi2"sv, .mode=RenderMode::Normal, .order=2},
+            {.name="ambi3"sv, .mode=RenderMode::Normal, .order=3},
+            {.name="ambi4"sv, .mode=RenderMode::Normal, .order=4},
+        });
 
         auto mode = std::string_view{*modeopt};
-        if(is_eq(al::ci_compare(mode, "basic"sv)))
+        if(al::ci_equal(mode, "basic"sv))
         {
             ERR(R"(HRTF mode "{}" deprecated, substituting "{}")", *modeopt, "ambi2");
             mode = "ambi2";
         }
 
         auto iter = std::ranges::find_if(hrtf_modes, [mode](const HrtfModeEntry &entry) -> bool
-        { return is_eq(al::ci_compare(mode, entry.name)); });
+        { return al::ci_equal(mode, entry.name); });
         if(iter == hrtf_modes.end())
             ERR("Unexpected hrtf-mode: {}", *modeopt);
         else
@@ -1089,7 +1113,7 @@ auto InitHrtfPanning(al::Device *const device) -> std::unique_ptr<DirectHrtfStat
         }
     }
     TRACE("{}{} order {}HRTF rendering enabled, using \"{}\"", ambi_order,
-        GetCounterSuffix(ambi_order.c_val), (device->mRenderMode == RenderMode::Hrtf) ? "+ Full " : "",
+        GetCounterSuffix(ambi_order), (device->mRenderMode == RenderMode::Hrtf) ? "+ Full " : "",
         device->mHrtfName);
 
     auto perHrirMin = false;
@@ -1116,12 +1140,12 @@ auto InitHrtfPanning(al::Device *const device) -> std::unique_ptr<DirectHrtfStat
         AmbiMatrix = AmbiMatrix2O;
         AmbiOrderHFGain = AmbiOrderHFGain2O;
     }
-    device->mAmbiOrder = ambi_order.c_val;
+    device->mAmbiOrder = ambi_order;
     device->m2DMixing = false;
 
-    const auto count = AmbiChannelsFromOrder(ambi_order.c_val);
+    const auto count = AmbiChannelsFromOrder(ambi_order);
     std::ranges::transform(AmbiIndex::FromACN|std::views::take(count), device->Dry.AmbiMap.begin(),
-        [](u8 const index) noexcept { return BFChannelConfig{1.0f, index.c_val}; });
+        [](std::uint8_t const index) noexcept { return BFChannelConfig{1.0f, index}; });
     AllocChannels(device, count, device->channelsFromFmt());
 
     auto const *const Hrtf = device->mHrtf.get();
@@ -1129,7 +1153,7 @@ auto InitHrtfPanning(al::Device *const device) -> std::unique_ptr<DirectHrtfStat
     hrtfstate->build(Hrtf, device->mIrSize, perHrirMin, AmbiPoints, AmbiMatrix, device->mXOverFreq,
         AmbiOrderHFGain);
 
-    InitNearFieldCtrl(device, Hrtf->mFields[0].distance, ambi_order.c_val, Periphonic);
+    InitNearFieldCtrl(device, Hrtf->mFields[0].distance, ambi_order, Periphonic);
     return hrtfstate;
 }
 
@@ -1142,8 +1166,8 @@ void InitUhjPanning(al::Device *const device)
     device->m2DMixing = true;
 
     std::ranges::transform(AmbiIndex::FromFuMa2D | std::views::take(count),
-        device->Dry.AmbiMap.begin(), [](u8 const acn) noexcept -> BFChannelConfig
-    { return BFChannelConfig{1.0f/AmbiScale::FromN3D[acn.c_val], acn.c_val}; });
+        device->Dry.AmbiMap.begin(), [](std::uint8_t const acn) noexcept -> BFChannelConfig
+    { return BFChannelConfig{1.0f/AmbiScale::FromN3D[acn], acn}; });
     AllocChannels(device, count, device->channelsFromFmt());
 
     /* TODO: Should this default to something else? This is simply a regular
@@ -1166,8 +1190,8 @@ void InitTsmePanning(al::Device *const device)
     device->m2DMixing = false;
 
     std::ranges::transform(AmbiIndex::FromACN | std::views::take(count),
-        device->Dry.AmbiMap.begin(), [](u8 const acn) noexcept -> BFChannelConfig
-    { return BFChannelConfig{1.0f/AmbiScale::FromN3D[acn.c_val], acn.c_val}; });
+        device->Dry.AmbiMap.begin(), [](std::uint8_t const acn) noexcept -> BFChannelConfig
+    { return BFChannelConfig{1.0f/AmbiScale::FromN3D[acn], acn}; });
     AllocChannels(device, count, device->channelsFromFmt());
 }
 
@@ -1286,7 +1310,7 @@ void aluInitRenderer(al::Device *const device, int const hrtf_id,
 
             auto const avg_dist = (accum_dist > 0.0f) ? accum_dist :
                 device->configValue<float>("decoder", "speaker-dist").value_or(1.0f);
-            InitNearFieldCtrl(device, avg_dist, decoder.mOrder.c_val, decoder.m3DMode);
+            InitNearFieldCtrl(device, avg_dist, decoder.mOrder, decoder.m3DMode);
 
             if(accum_dist > 0.0f)
                 InitDistanceComp(device, decoder.mChannels, speakerdists);
@@ -1443,6 +1467,6 @@ void aluInitEffectPanning(EffectSlotBase *slot, al::Context *context)
 
     slot->Wet.AmbiMap.fill(BFChannelConfig{});
     std::ranges::transform(AmbiIndex::FromACN | std::views::take(count), slot->Wet.AmbiMap.begin(),
-        [](u8 const acn) noexcept { return BFChannelConfig{1.0f, acn.c_val}; });
+        [](std::uint8_t const acn) noexcept { return BFChannelConfig{1.0f, acn}; });
     slot->Wet.Buffer = slot->mWetBuffer;
 }

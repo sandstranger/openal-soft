@@ -23,11 +23,13 @@
 #include "effect.h"
 
 #include <algorithm>
+#include <bit>
+#include <cstddef>
+#include <cstdint>
 #include <iterator>
 #include <memory>
 #include <mutex>
 #include <new>
-#include <numeric>
 #include <ranges>
 #include <string_view>
 #include <unordered_map>
@@ -43,10 +45,10 @@
 #include "al/effects/effects.h"
 #include "alc/inprogext.h"
 #include "almalloc.h"
-#include "alnumeric.h"
 #include "core/except.h"
 #include "direct_defs.h"
 #include "opthelpers.h"
+#include "zudl.hpp"
 
 #if HAVE_CXXMODULES
 import alc.context;
@@ -54,12 +56,14 @@ import alc.device;
 import alstring;
 import gsl;
 import logging;
+import numeric;
 #else
 #include "alc/context.hpp"
 #include "alc/device.h"
 #include "alstring.h"
 #include "core/logging.h"
 #include "gsl/gsl"
+#include "numeric.hpp"
 #endif
 
 
@@ -147,11 +151,11 @@ void InitEffectParams(al::Effect& effect, ALenum const type) noexcept
 }
 
 [[nodiscard]]
-auto EnsureEffects(al::Device& device, usize const needed) noexcept -> bool
+auto EnsureEffects(al::Device& device, std::size_t const needed) noexcept -> bool
 try {
-    auto count = std::accumulate(device.EffectList.cbegin(), device.EffectList.cend(), 0_usize,
-        [](usize const cur, const EffectSubList &sublist) noexcept -> usize
-        { return cur + sublist.mFreeMask.popcount(); });
+    auto count = std::accumulate(device.EffectList.cbegin(), device.EffectList.cend(), 0_uz,
+        [](std::size_t const cur, const EffectSubList &sublist) noexcept -> std::size_t
+        { return cur + as_unsigned(std::popcount(sublist.mFreeMask)); });
 
     while(needed > count)
     {
@@ -159,7 +163,6 @@ try {
             return false;
 
         auto sublist = EffectSubList{};
-        sublist.mFreeMask = ~0_u64;
         sublist.mEffects = SubListAllocator{}.allocate(1);
         device.EffectList.emplace_back(std::move(sublist));
         count += std::tuple_size_v<SubListAllocator::value_type>;
@@ -176,7 +179,7 @@ auto AllocEffect(al::Device& device) noexcept -> gsl::not_null<al::Effect*>
     auto const sublist = std::ranges::find_if(device.EffectList,
         [](EffectSubList const &slist) { return slist.mFreeMask != 0; });
     auto const lidx = gsl::narrow_cast<ALuint>(std::distance(device.EffectList.begin(), sublist));
-    auto const slidx = sublist->mFreeMask.countr_zero().c_val;
+    auto const slidx = as_unsigned(std::countr_zero(sublist->mFreeMask));
     ASSUME(slidx < 64);
 
     auto effect = gsl::make_not_null(std::construct_at(
@@ -186,7 +189,7 @@ auto AllocEffect(al::Device& device) noexcept -> gsl::not_null<al::Effect*>
     /* Add 1 to avoid effect ID 0. */
     effect->mId = ((lidx<<6) | slidx) + 1;
 
-    sublist->mFreeMask &= ~(1_u64 << slidx);
+    sublist->mFreeMask &= ~(std::uint64_t{1} << slidx);
 
     return effect;
 }
@@ -201,7 +204,7 @@ void FreeEffect(al::Device& device, al::Effect& effect)
 
     std::destroy_at(&effect);
 
-    device.EffectList[lidx].mFreeMask |= 1_u64 << slidx;
+    device.EffectList[lidx].mFreeMask |= std::uint64_t{1} << slidx;
 }
 
 [[nodiscard]]
@@ -214,7 +217,7 @@ auto LookupEffect(std::nothrow_t, al::Device const& device, ALuint const id) noe
     if(lidx >= device.EffectList.size()) [[unlikely]]
         return nullptr;
     auto &sublist = device.EffectList[lidx];
-    if((sublist.mFreeMask & (1_u64 << slidx)) != 0) [[unlikely]]
+    if((sublist.mFreeMask & (std::uint64_t{1} << slidx)) != 0) [[unlikely]]
         return nullptr;
     return std::to_address(std::next(sublist.mEffects->begin(), as_signed(slidx)));
 }
@@ -519,9 +522,9 @@ EffectSubList::~EffectSubList()
     auto usemask = ~mFreeMask;
     while(usemask != 0)
     {
-        const auto idx = usemask.countr_zero();
-        std::destroy_at(std::to_address(std::next(mEffects->begin(), as_signed(idx.c_val))));
-        usemask &= ~(1_u64 << idx);
+        const auto idx = std::countr_zero(usemask);
+        std::destroy_at(std::to_address(std::next(mEffects->begin(), idx)));
+        usemask &= ~(std::uint64_t{1} << as_unsigned(idx));
     }
     mFreeMask = ~usemask;
     SubListAllocator{}.deallocate(mEffects, 1);
@@ -666,7 +669,7 @@ static constexpr auto reverblist = std::array{
 
 void LoadReverbPreset(std::string_view const name, al::Effect& effect)
 {
-    if(is_eq(al::ci_compare(name, "NONE"sv)))
+    if(al::ci_equal(name, "NONE"sv))
     {
         InitEffectParams(effect, AL_EFFECT_NULL);
         TRACE("Loading reverb '{}'", "NONE");
@@ -685,7 +688,7 @@ void LoadReverbPreset(std::string_view const name, al::Effect& effect)
     }
 
     const auto preset = std::ranges::find_if(reverblist, [name](EffectPreset const &item) -> bool
-    { return is_eq(al::ci_compare(name, item.name)); });
+    { return al::ci_equal(name, item.name); });
     if(preset == reverblist.end())
     {
         WARN("Reverb preset '{}' not found", name);

@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <functional>
@@ -23,13 +24,13 @@
 #include <utility>
 #include <vector>
 
-#include "alnumeric.h"
 #include "ambidefs.h"
 #include "filters/splitter.h"
 #include "gsl/gsl"
 #include "hrtf_loader.hpp"
 #include "hrtf_resource.hpp"
 #include "mixer/hrtfdefs.h"
+#include "opthelpers.h"
 #include "polyphase_resampler.h"
 #include "zudl.hpp"
 
@@ -40,17 +41,17 @@ import filesystem;
 import format;
 import hrtfstore;
 import logging;
+import numeric;
 import spanstream;
-import types;
 #else
 #include "alformat.hpp"
 #include "alformatpath.hpp"
-#include "alformattypes.hpp"
 #include "alstring.h"
 #include "core/helpers.hpp"
 #include "core/hrtfstore.hpp"
 #include "core/logging.h"
 #include "filesystem.h"
+#include "numeric.hpp"
 #include "spanstream.hpp"
 #endif
 
@@ -91,7 +92,7 @@ auto CalcEvIndex(unsigned evcount, float ev) -> IdxBlend
 {
     ev = (std::numbers::inv_pi_v<float>*ev + 0.5f) * gsl::narrow_cast<float>(evcount-1);
 
-    const auto idx = float2uint(ev);
+    const auto idx = al::saturating_cast<unsigned>(ev);
     return IdxBlend{std::min(idx, evcount-1u), ev-gsl::narrow_cast<float>(idx)};
 }
 
@@ -102,7 +103,7 @@ auto CalcAzIndex(unsigned azcount, float az) -> IdxBlend
 {
     az = (std::numbers::inv_pi_v<float>*0.5f*az + 1.0f) * gsl::narrow_cast<float>(azcount);
 
-    const auto idx = float2uint(az);
+    const auto idx = al::saturating_cast<unsigned>(az);
     return IdxBlend{idx%azcount, az-gsl::narrow_cast<float>(idx)};
 }
 
@@ -494,9 +495,9 @@ try {
         auto const rate_scale = gsl::narrow_cast<float>(devrate)
             / gsl::narrow_cast<float>(unsigned{hrtf->mSampleRate});
         std::ranges::transform(hrtf->mDelays | std::views::join, new_delays.begin(),
-            [&max_delay,rate_scale](u8 const oldval)
+            [&max_delay,rate_scale](std::uint8_t const oldval)
         {
-            auto const ret = std::round(gsl::narrow_cast<float>(oldval.c_val) * rate_scale)
+            auto const ret = std::round(gsl::narrow_cast<float>(oldval) * rate_scale)
                 / float{HrirDelayFracOne};
             max_delay = std::max(max_delay, ret);
             return ret;
@@ -519,7 +520,7 @@ try {
         std::ranges::transform(new_delays, (delays | std::views::join).begin(),
             [delay_scale](float const fdelay) -> std::uint8_t
         {
-            return al::saturating_cast<std::uint8_t>(float2int(fdelay*delay_scale + 0.5f));
+            return al::saturating_cast<std::uint8_t>(fdelay*delay_scale + 0.5f);
         });
 
         /* Scale the IR size for the new sample rate and update the stored
@@ -527,7 +528,7 @@ try {
          */
         auto const newIrSize = std::round(gsl::narrow_cast<float>(unsigned{hrtf->mIrSize})
             * rate_scale);
-        hrtf->mIrSize = gsl::narrow_cast<u8::value_t>(std::min(float{HrirLength}, newIrSize));
+        hrtf->mIrSize = gsl::narrow_cast<std::uint8_t>(std::min(float{HrirLength}, newIrSize));
         hrtf->mSampleRate = devrate & 0xff'ff'ff;
     }
 

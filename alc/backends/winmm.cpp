@@ -30,12 +30,12 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <ranges>
 #include <string>
 #include <thread>
 #include <vector>
 
-#include "alnumeric.h"
 #include "althrd_setname.h"
 #include "ringbuffer.h"
 #include "vector.h"
@@ -53,16 +53,16 @@ import core.helpers;
 import format;
 import gsl;
 import logging;
-import types;
+import numeric;
 #else
 #include "alc/backends/exception.hpp"
 #include "alformat.hpp"
 #include "alstring.h"
-#include "altypes.hpp"
 #include "core/device.h"
 #include "core/helpers.hpp"
 #include "core/logging.h"
 #include "gsl/gsl"
+#include "numeric.hpp"
 #endif
 
 namespace {
@@ -259,7 +259,7 @@ void WinMMPlayback::open(std::string_view name)
 
 auto WinMMPlayback::reset() -> bool
 {
-    mDevice.mBufferSize = gsl::narrow_cast<unsigned>(u64::value_t{mDevice.mBufferSize} *
+    mDevice.mBufferSize = gsl::narrow<unsigned>(std::uint64_t{mDevice.mBufferSize} *
         mFormat.nSamplesPerSec / mDevice.mSampleRate);
     mDevice.mBufferSize = (mDevice.mBufferSize+3) & ~0x3u;
     mDevice.mUpdateSize = mDevice.mBufferSize / 4;

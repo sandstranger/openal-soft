@@ -28,16 +28,17 @@
 #include <span>
 #include <variant>
 
-#include "alnumeric.h"
 #include "core/cubic_defs.h"
 #include "core/resampler_limits.hpp"
 #include "defs.h"
-#include "opthelpers.h"
+#include "opthelper_macros.hpp"
 
 #if HAVE_CXXMODULES
 import gsl;
+import numeric;
 #else
 #include "gsl/gsl"
+#include "numeric.hpp"
 #endif
 
 

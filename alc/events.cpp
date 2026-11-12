@@ -6,7 +6,6 @@
 #include <ranges>
 #include <span>
 
-#include "alnumeric.h"
 #include "backends/base.hpp"
 #include "bitset.hpp"
 #include "opthelpers.h"
@@ -16,11 +15,13 @@ import alc.device;
 import format;
 import gsl;
 import logging;
+import numeric;
 #else
 #include "alc/device.h"
 #include "alformat.hpp"
 #include "core/logging.h"
 #include "gsl/gsl"
+#include "numeric.hpp"
 #endif
 
 
@@ -33,7 +34,7 @@ namespace {
 #endif
 
 using EventBitSet = al::bitset<alc::EventType>;
-auto gEventsEnabled = EventBitSet{0};
+auto gEventsEnabled = EventBitSet{};
 
 [[nodiscard]] constexpr
 auto EnumFromEventType(const alc::EventType type) -> ALCenum

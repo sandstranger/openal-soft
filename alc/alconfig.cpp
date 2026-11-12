@@ -44,7 +44,6 @@
 #include <utility>
 #include <vector>
 
-#include "alnumeric.h"
 #include "envutils.hpp"
 #include "inout_ptr.hpp"
 
@@ -63,6 +62,7 @@ import filesystem;
 import fmtlib;
 import gsl;
 import logging;
+import numeric;
 #else
 #include "alformatpath.hpp"
 #include "alstring.h"
@@ -72,6 +72,7 @@ import logging;
 #include "fmt/format.h"
 #include "fmt/ranges.h"
 #include "gsl/gsl"
+#include "numeric.hpp"
 #endif
 
 namespace {
@@ -121,7 +122,7 @@ auto validate_utf8(const std::string_view str) -> bool
         /* Get the number of bytes that make up this codepoint (must be at
          * least 2). This includes the current byte.
          */
-        const auto tocheck = std::countl_one(as_unsigned(*current));
+        const auto tocheck = std::countl_one(static_cast<unsigned char>(*current));
         if(tocheck < 2 || tocheck > remaining)
             return false;
 
@@ -217,8 +218,7 @@ void LoadConfigFromFile(std::istream &f)
         if(not validate_utf8(buffer))
         {
             ERR(" config parse error: non-UTF-8 characters on line {}", linenum);
-            ERR("{}", fmt::format("  {::#04x}",
-                buffer|std::views::transform([](auto c) { return as_unsigned(c); })));
+            ERR("{}", fmt::format("  {::#04x}", std::as_bytes(std::span{buffer})));
             continue;
         }
 
@@ -241,7 +241,7 @@ void LoadConfigFromFile(std::istream &f)
             auto section = std::string_view{buffer}.substr(1, endpos-1);
 
             curSection.clear();
-            if(is_eq(al::ci_compare(section, "general"sv)))
+            if(al::ci_equal(section, "general"sv))
                 continue;
 
             while(!section.empty())
@@ -356,7 +356,7 @@ auto GetConfigValue(const std::string_view devName, const std::string_view block
         return EmptyString;
 
     auto key = std::string{};
-    if(!blockName.empty() && is_neq(al::ci_compare(blockName, "general"sv)))
+    if(!blockName.empty() && al::ci_nequal(blockName, "general"sv))
     {
         key = blockName;
         key += '/';
@@ -600,8 +600,8 @@ auto ConfigValueBool(std::string_view const devName, std::string_view const bloc
     std::string_view const keyName) -> std::optional<bool>
 {
     if(auto&& val = GetConfigValue(devName, blockName, keyName); !val.empty()) try {
-        return is_eq(al::ci_compare(val, "on"sv)) or is_eq(al::ci_compare(val, "yes"sv))
-            or is_eq(al::ci_compare(val, "true"sv)) or std::stoll(val) != 0;
+        return al::ci_equal(val, "on"sv) or al::ci_equal(val, "yes"sv)
+            or al::ci_equal(val, "true"sv) or std::stoll(val) != 0;
     }
     catch(std::out_of_range&) {
         /* If out of range, the value is some non-0 (true) value and it doesn't
@@ -622,8 +622,8 @@ auto GetConfigValueBool(const std::string_view devName, const std::string_view b
     const std::string_view keyName, bool def) -> bool
 {
     if(auto&& val = GetConfigValue(devName, blockName, keyName); !val.empty()) try {
-        return is_eq(al::ci_compare(val, "on"sv)) or is_eq(al::ci_compare(val, "yes"sv))
-            or is_eq(al::ci_compare(val, "true"sv)) or std::stoll(val) != 0;
+        return al::ci_equal(val, "on"sv) or al::ci_equal(val, "yes"sv)
+            or al::ci_equal(val, "true"sv) or std::stoll(val) != 0;
     }
     catch(std::out_of_range&) {
         return true;

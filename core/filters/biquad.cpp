@@ -11,9 +11,15 @@
 #include <numbers>
 #include <ranges>
 
-#include "alnumeric.h"
+#include "opthelper_macros.hpp"
+
+#if HAVE_CXXMODULES
+import gsl;
+import numeric;
+#else
 #include "gsl/gsl"
-#include "opthelpers.h"
+#include "numeric.hpp"
+#endif
 
 
 namespace {

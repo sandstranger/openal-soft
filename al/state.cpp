@@ -25,6 +25,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <deque>
 #include <mutex>
 #include <optional>
@@ -40,7 +41,6 @@
 #include "al/listener.h"
 #include "alc/alu.h"
 #include "alc/inprogext.h"
-#include "alnumeric.h"
 #include "atomic.h"
 #include "core/mixer/defs.h"
 #include "core/voice.h"
@@ -61,12 +61,14 @@ import alc.device;
 import format;
 import gsl;
 import logging;
+import numeric;
 #else
 #include "alc/context.hpp"
 #include "alc/device.h"
 #include "alformat.hpp"
 #include "core/logging.h"
 #include "gsl/gsl"
+#include "numeric.hpp"
 #endif
 
 
@@ -191,24 +193,14 @@ template<typename T>
 struct PropertyCastType {
     template<typename U> [[nodiscard]]
     constexpr auto operator()(U&& value) const noexcept -> T
-    {
-        if constexpr(al::strict_number<std::remove_cvref_t<U>>)
-            return gsl::narrow_cast<T>(std::forward<U>(value).c_val);
-        else
-            return gsl::narrow_cast<T>(std::forward<U>(value));
-    }
+    { return gsl::narrow_cast<T>(std::forward<U>(value)); }
 };
 /* Special-case ALboolean to be an actual bool instead of a char type. */
 template<>
 struct PropertyCastType<ALboolean> {
     template<typename U> [[nodiscard]]
     constexpr auto operator()(U&& value) const noexcept -> ALboolean
-    {
-        if constexpr(al::strict_number<std::remove_cvref_t<U>>)
-            return gsl::narrow_cast<bool>(std::forward<U>(value).c_val) ? AL_TRUE : AL_FALSE;
-        else
-            return gsl::narrow_cast<bool>(std::forward<U>(value)) ? AL_TRUE : AL_FALSE;
-    }
+    { return gsl::narrow_cast<bool>(std::forward<U>(value)) ? AL_TRUE : AL_FALSE; }
 };
 
 

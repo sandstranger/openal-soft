@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <bit>
 #include <cctype>
+#include <cmath>
 #include <cstdarg>
 #include <cstddef>
 #include <cstdio>
@@ -15,7 +16,6 @@
 #include <sstream>
 #include <string>
 
-#include "alnumeric.h"
 #include "zudl.hpp"
 
 #if HAVE_CXXMODULES
@@ -23,11 +23,13 @@ import alstring;
 import filesystem;
 import format;
 import gsl;
+import numeric;
 #else
 #include "alformat.hpp"
 #include "alstring.h"
 #include "filesystem.h"
 #include "gsl/gsl"
+#include "numeric.hpp"
 #endif
 
 namespace {

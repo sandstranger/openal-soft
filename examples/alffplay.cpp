@@ -31,7 +31,6 @@
 #include <variant>
 #include <vector>
 
-#include "alnumeric.h"
 #include "inout_ptr.hpp"
 #include "opthelpers.h"
 #include "pragmadefs.h"
@@ -70,6 +69,7 @@ import alhelpers;
 import alstring;
 import fmtlib;
 import gsl;
+import numeric;
 import openal;
 import zstring_view;
 
@@ -92,6 +92,7 @@ import zstring_view;
 #include "fmt/base.h"
 #include "fmt/ostream.h"
 #include "gsl/gsl"
+#include "numeric.hpp"
 #endif
 
 
@@ -2125,28 +2126,31 @@ void MovieState::stop()
 
 
 // Helper method to print the time with human-readable formatting.
-auto PrettyTime(seconds t) -> std::string
+[[nodiscard]]
+auto PrettyTime(seconds t, seconds const total) -> std::string
 {
     using std::chrono::minutes;
     using std::chrono::hours;
 
     if(t.count() < 0)
-        return "0s";
+        t = seconds::zero();
 
     // Only handle up to hour formatting
-    if(t >= hours{1})
+    if(total >= hours{1})
         return fmt::format("{}h{:02}m{:02}s", duration_cast<hours>(t).count(),
             duration_cast<minutes>(t).count()%60, t.count()%60);
-    return fmt::format("{}m{:02}s", duration_cast<minutes>(t).count(), t.count()%60);
+    if(total >= minutes{10})
+        return fmt::format("{:2}m{:02}s", duration_cast<minutes>(t).count(), t.count()%60);
+    if(total >= minutes{1})
+        return fmt::format("{}m{:02}s", duration_cast<minutes>(t).count(), t.count()%60);
+    return fmt::format("{:02}s", t.count());
 }
 
 
 struct Application {
     std::span<al::zstring_view> mArgs{};
 
-    using ALMgrHandle = std::invoke_result_t<decltype(InitAL), std::span<al::zstring_view>&,
-        ALCint const*>;
-    std::optional<ALMgrHandle> mALManager{};
+    std::optional<decltype(InitAL(mArgs))> mALManager{};
 
     SDL_Window *mWindow{};
     SDL_Renderer *mRenderer{};
@@ -2331,10 +2335,10 @@ auto main(std::span<al::zstring_view> args) -> int
                     return std::numeric_limits<float>::quiet_NaN();
                 });
                 if(optarg.starts_with('+') || optarg.starts_with('-')
-                    || is_eq(al::ci_compare(optarg.substr(endpos), "db")))
+                    || al::ci_equal(optarg.substr(endpos), "db"))
                 {
                     if(!std::isfinite(gainval) || (endpos != optarg.size()
-                            && is_neq(al::ci_compare(optarg.substr(endpos), "db"))))
+                            && al::ci_nequal(optarg.substr(endpos), "db")))
                         fmt::println(std::cerr, "Invalid dB gain value: {}", optarg);
                     else
                         PlaybackGain = std::pow(10.0f, gainval/20.0f);
@@ -2368,7 +2372,7 @@ auto main(std::span<al::zstring_view> args) -> int
                 });
                 if(!(stretchval > 0.0f) || endpos != optarg.size())
                     fmt::println(std::cerr, "Invalid tstretch value: {}", optarg);
-                else if(!alcIsExtensionPresent(app.mALManager->mDevice, "ALC_EXT_EFX"))
+                else if(!alcIsExtensionPresent(app.mALManager->device(), "ALC_EXT_EFX"))
                     fmt::println(std::cerr, "EFX not supported for time stretching");
                 else
                     TimeStretchFactor = stretchval;
@@ -2395,7 +2399,7 @@ auto main(std::span<al::zstring_view> args) -> int
                 auto const pitchtune = std::pow(2.0f, tuneval / 12.0f);
                 if(!std::isfinite(pitchtune) || endpos != optarg.size())
                     fmt::println(std::cerr, "Invalid tune value: {}", optarg);
-                else if(!alcIsExtensionPresent(app.mALManager->mDevice, "ALC_EXT_EFX"))
+                else if(!alcIsExtensionPresent(app.mALManager->device(), "ALC_EXT_EFX"))
                     fmt::println(std::cerr, "EFX not supported for pitch tuning");
                 else
                     PitchTuneFactor = pitchtune;
@@ -2486,7 +2490,8 @@ auto main(std::span<al::zstring_view> args) -> int
         if(cur_time != app.mLastTime)
         {
             const auto end_time = duration_cast<seconds>(app.mMovieState->getDuration());
-            fmt::print("    \r {} / {}", PrettyTime(cur_time), PrettyTime(end_time));
+            fmt::print("    \r {} / {}", PrettyTime(cur_time, end_time),
+                PrettyTime(end_time, end_time));
             std::cout.flush();
             app.mLastTime = cur_time;
         }

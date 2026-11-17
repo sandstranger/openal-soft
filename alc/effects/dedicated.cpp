@@ -33,8 +33,10 @@
 #include "intrusive_ptr.h"
 
 #if HAVE_CXXMODULES
+import core.ambi_utils;
 import core.device;
 #else
+#include "core/ambi_utils.hpp"
 #include "core/device.h"
 #endif
 
@@ -120,8 +122,8 @@ struct DedicatedStateFactory final : EffectStateFactory {
 
 } // namespace
 
-auto DedicatedStateFactory_getFactory() -> gsl::not_null<EffectStateFactory*>
+auto DedicatedStateFactory_getFactory() -> EffectStateFactory&
 {
-    static DedicatedStateFactory DedicatedFactory{};
-    return gsl::make_not_null(&DedicatedFactory);
+    static auto DedicatedFactory = DedicatedStateFactory{};
+    return DedicatedFactory;
 }

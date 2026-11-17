@@ -33,11 +33,6 @@
 #include <string_view>
 #include <utility>
 
-#include "AL/al.h"
-#include "AL/alc.h"
-#include "AL/alext.h"
-
-#include "al/debug.h"
 #include "alc/alconfig.h"
 #include "core/except.h"
 #include "direct_defs.h"
@@ -45,12 +40,21 @@
 #include "zudl.hpp"
 
 #if HAVE_CXXMODULES
+import openal;
+#include "openal_apientry.h"
+
+import al.iface;
 import alc.context;
 import format;
 import gsl;
 import logging;
 import numeric;
 #else
+#include "AL/al.h"
+#include "AL/alc.h"
+#include "AL/alext.h"
+
+#include "al/debug.h"
 #include "alc/context.hpp"
 #include "alformat.hpp"
 #include "core/logging.h"

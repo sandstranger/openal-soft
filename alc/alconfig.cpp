@@ -36,16 +36,15 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
-#include <istream>
 #include <limits>
 #include <ranges>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "envutils.hpp"
-#include "inout_ptr.hpp"
 
 #if ALSOFT_UWP
 #include <winrt/Windows.Media.Core.h> // !!This is important!!
@@ -57,13 +56,16 @@ using namespace winrt;
 
 #if HAVE_CXXMODULES
 import alstring;
+import common.std;
 import core.helpers;
 import filesystem;
 import fmtlib;
 import gsl;
+import inout_ptr;
 import logging;
 import numeric;
 #else
+#include <istream>
 #include "alformatpath.hpp"
 #include "alstring.h"
 #include "core/helpers.hpp"
@@ -72,6 +74,7 @@ import numeric;
 #include "fmt/format.h"
 #include "fmt/ranges.h"
 #include "gsl/gsl"
+#include "inout_ptr.hpp"
 #include "numeric.hpp"
 #endif
 

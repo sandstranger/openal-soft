@@ -11,7 +11,6 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
-#include <istream>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -24,9 +23,7 @@
 #include <utility>
 #include <vector>
 
-#include "ambidefs.h"
 #include "filters/splitter.h"
-#include "gsl/gsl"
 #include "hrtf_loader.hpp"
 #include "hrtf_resource.hpp"
 #include "mixer/hrtfdefs.h"
@@ -36,21 +33,28 @@
 
 #if HAVE_CXXMODULES
 import alstring;
+import common.std;
+import core.ambi_utils;
 import core.helpers;
 import filesystem;
 import format;
+import gsl;
 import hrtfstore;
 import logging;
 import numeric;
 import spanstream;
+#include "gsl_macros.hpp"
 #else
+#include <istream>
 #include "alformat.hpp"
 #include "alformatpath.hpp"
 #include "alstring.h"
+#include "core/ambi_utils.hpp"
 #include "core/helpers.hpp"
 #include "core/hrtfstore.hpp"
 #include "core/logging.h"
 #include "filesystem.h"
+#include "gsl/gsl"
 #include "numeric.hpp"
 #include "spanstream.hpp"
 #endif
@@ -160,13 +164,13 @@ void HrtfStore::getCoeffs(float const elevation, float const azimuth, float cons
         + mDelays[idx[1]][0]*blend[1]
         + mDelays[idx[2]][0]*blend[2]
         + mDelays[idx[3]][0]*blend[3];
-    delays[0] = fastf2u(d * float{1.0f/HrirDelayFracOne});
+    delays[0] = al::saturating_round<unsigned>(d * float{1.0f/HrirDelayFracOne});
 
     d = mDelays[idx[0]][1]*blend[0]
         + mDelays[idx[1]][1]*blend[1]
         + mDelays[idx[2]][1]*blend[2]
         + mDelays[idx[3]][1]*blend[3];
-    delays[1] = fastf2u(d * float{1.0f/HrirDelayFracOne});
+    delays[1] = al::saturating_round<unsigned>(d * float{1.0f/HrirDelayFracOne});
 
     /* Calculate the blended HRIR coefficients. */
     coeffs[0][0] = PassthruCoeff * (1.0f-dirfact);
@@ -520,15 +524,14 @@ try {
         std::ranges::transform(new_delays, (delays | std::views::join).begin(),
             [delay_scale](float const fdelay) -> std::uint8_t
         {
-            return al::saturating_cast<std::uint8_t>(fdelay*delay_scale + 0.5f);
+            return al::saturating_round<std::uint8_t>(fdelay*delay_scale);
         });
 
         /* Scale the IR size for the new sample rate and update the stored
          * sample rate.
          */
-        auto const newIrSize = std::round(gsl::narrow_cast<float>(unsigned{hrtf->mIrSize})
-            * rate_scale);
-        hrtf->mIrSize = gsl::narrow_cast<std::uint8_t>(std::min(float{HrirLength}, newIrSize));
+        auto const newIrSize = al::saturating_round<std::uint8_t>(hrtf->mIrSize * rate_scale);
+        hrtf->mIrSize = std::min(std::uint8_t{HrirLength}, newIrSize);
         hrtf->mSampleRate = devrate & 0xff'ff'ff;
     }
 

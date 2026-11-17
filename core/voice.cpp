@@ -2,8 +2,6 @@
 #include "config.h"
 #include "config_simd.h"
 
-#include "voice.h"
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -18,34 +16,39 @@
 #include <utility>
 #include <vector>
 
-#include "ambidefs.h"
 #include "async_event.h"
-#include "buffer_storage.h"
 #include "context.h"
 #include "cpu_caps.h"
 #include "filters/biquad.h"
 #include "filters/nfc.h"
 #include "filters/splitter.h"
 #include "fmt_traits.h"
-#include "gsl/gsl"
 #include "mixer.h"
 #include "mixer/defs.h"
 #include "mixer/hrtfdefs.h"
 #include "opthelper_macros.hpp"
 #include "resampler_limits.hpp"
-#include "ringbuffer.h"
 #include "uhjfilter.h"
 #include "zudl.hpp"
 
 #if HAVE_CXXMODULES
 import alstring;
+import core.ambi_utils;
+import core.buffer_storage;
 import core.device;
+import core.voice;
+import gsl;
 import logging;
 import numeric;
+#include "gsl_macros.hpp"
 #else
 #include "alstring.h"
+#include "core/ambi_utils.hpp"
+#include "core/buffer_storage.h"
 #include "core/device.h"
 #include "core/logging.h"
+#include "core/voice.h"
+#include "gsl/gsl"
 #include "numeric.hpp"
 #endif
 
@@ -158,22 +161,21 @@ void Voice::InitMixer(std::optional<std::string> const &resopt)
             std::string_view const name;
             Resampler const resampler;
         };
-        constexpr auto ResamplerList = std::array{
-            ResamplerEntry{"none"sv, Resampler::Point},
-            ResamplerEntry{"point"sv, Resampler::Point},
-            ResamplerEntry{"linear"sv, Resampler::Linear},
-            ResamplerEntry{"spline"sv, Resampler::Spline},
-            ResamplerEntry{"gaussian"sv, Resampler::Gaussian},
-            ResamplerEntry{"bsinc12"sv, Resampler::BSinc12},
-            ResamplerEntry{"fast_bsinc12"sv, Resampler::FastBSinc12},
-            ResamplerEntry{"bsinc24"sv, Resampler::BSinc24},
-            ResamplerEntry{"fast_bsinc24"sv, Resampler::FastBSinc24},
-            ResamplerEntry{"bsinc48"sv, Resampler::BSinc48},
-            ResamplerEntry{"fast_bsinc48"sv, Resampler::FastBSinc48},
-        };
+        auto constexpr ResamplerList = std::to_array<ResamplerEntry>({
+            {.name="none"sv, .resampler=Resampler::Point},
+            {.name="point"sv, .resampler=Resampler::Point},
+            {.name="linear"sv, .resampler=Resampler::Linear},
+            {.name="spline"sv, .resampler=Resampler::Spline},
+            {.name="gaussian"sv, .resampler=Resampler::Gaussian},
+            {.name="bsinc12"sv, .resampler=Resampler::BSinc12},
+            {.name="fast_bsinc12"sv, .resampler=Resampler::FastBSinc12},
+            {.name="bsinc24"sv, .resampler=Resampler::BSinc24},
+            {.name="fast_bsinc24"sv, .resampler=Resampler::FastBSinc24},
+            {.name="bsinc48"sv, .resampler=Resampler::BSinc48},
+            {.name="fast_bsinc48"sv, .resampler=Resampler::FastBSinc48},
+        });
 
         auto resampler = std::string_view{*resopt};
-		
         if(al::ci_equal(resampler, "cubic"sv))
         {
             WARN("Resampler option \"{}\" is deprecated, using spline", *resopt);
@@ -869,7 +871,7 @@ void DoHrtfMix(std::span<float const> const samples, DirectParams &parms, float 
         if(counter > fademix)
         {
             auto const a = gsl::narrow_cast<float>(fademix) / gsl::narrow_cast<float>(counter);
-            gain = lerpf(parms.Hrtf.Old.Gain, targetGain, a);
+            gain = al::lerp(parms.Hrtf.Old.Gain, targetGain, a);
         }
 
         auto const hrtfparams = MixHrtfFilter{
@@ -897,7 +899,7 @@ void DoHrtfMix(std::span<float const> const samples, DirectParams &parms, float 
         {
             auto const a = gsl::narrow_cast<float>(todo)
                 / gsl::narrow_cast<float>(counter-fademix);
-            gain = lerpf(parms.Hrtf.Old.Gain, targetGain, a);
+            gain = al::lerp(parms.Hrtf.Old.Gain, targetGain, a);
         }
 
         auto const hrtfparams = MixHrtfFilter{

@@ -31,7 +31,6 @@
 #include <variant>
 #include <vector>
 
-#include "inout_ptr.hpp"
 #include "opthelpers.h"
 #include "pragmadefs.h"
 #include "zudl.hpp"
@@ -69,16 +68,13 @@ import alhelpers;
 import alstring;
 import fmtlib;
 import gsl;
+import inout_ptr;
 import numeric;
 import openal;
 import zstring_view;
 
 /* AL_APIENTRY is needed, but not exported from the module. */
-#ifdef _WIN32
- #define AL_APIENTRY __cdecl
-#else
- #define AL_APIENTRY
-#endif
+#include "openal_apientry.h"
 
 #else
 
@@ -92,6 +88,7 @@ import zstring_view;
 #include "fmt/base.h"
 #include "fmt/ostream.h"
 #include "gsl/gsl"
+#include "inout_ptr.hpp"
 #include "numeric.hpp"
 #endif
 
@@ -1774,9 +1771,9 @@ void VideoState::updateVideo(SDL_Window *screen, SDL_Renderer *renderer, bool re
             {
                 const auto aspect_ratio = av_q2d(frame->sample_aspect_ratio);
                 if(aspect_ratio >= 1.0)
-                    frame_width = gsl::narrow_cast<int>(std::lround(frame_width * aspect_ratio));
+                    frame_width = al::saturating_round<int>(frame_width * aspect_ratio);
                 else if(aspect_ratio > 0.0)
-                    frame_height = gsl::narrow_cast<int>(std::lround(frame_height / aspect_ratio));
+                    frame_height = al::saturating_round<int>(frame_height / aspect_ratio);
             }
             if(SDL_SetWindowSize(screen, frame_width, frame_height))
             {
@@ -2437,7 +2434,7 @@ auto main(std::span<al::zstring_view> args) -> int
             }
             else
             {
-                auto const tune = static_cast<int>(std::lround(std::log2(pitch) * 1200.0f));
+                auto const tune = al::saturating_round<int>(std::log2(pitch) * 1200.0f);
                 auto const [course_tune, fine_tune] = std::invoke([tune]() -> std::pair<int, int>
                 {
                     auto const course = tune / 100;

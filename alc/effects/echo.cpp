@@ -88,8 +88,8 @@ void EchoState::deviceUpdate(const DeviceBase *Device, const BufferStorage*)
 
     // Use the next power of 2 for the buffer length, so the tap offsets can be
     // wrapped using a mask instead of a modulo
-    auto const maxlen = std::bit_ceil(al::saturating_cast<unsigned>(EchoMaxDelay*frequency + 0.5f)+
-        al::saturating_cast<unsigned>(EchoMaxLRDelay*frequency + 0.5f));
+    auto const maxlen = std::bit_ceil(al::saturating_round<unsigned>(EchoMaxDelay * frequency) +
+        al::saturating_round<unsigned>(EchoMaxLRDelay * frequency));
     if(maxlen != mSampleBuffer.size())
         decltype(mSampleBuffer)(maxlen).swap(mSampleBuffer);
 
@@ -176,8 +176,8 @@ struct EchoStateFactory final : public EffectStateFactory {
 
 } // namespace
 
-auto EchoStateFactory_getFactory() -> gsl::not_null<EffectStateFactory*>
+auto EchoStateFactory_getFactory() -> EffectStateFactory&
 {
-    static EchoStateFactory EchoFactory{};
-    return gsl::make_not_null(&EchoFactory);
+    static auto EchoFactory = EchoStateFactory{};
+    return EchoFactory;
 }

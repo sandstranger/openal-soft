@@ -31,7 +31,6 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdlib>
-#include <iostream>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -44,7 +43,6 @@
 #include <vector>
 
 #include "albit.h"
-#include "gsl/assert"
 #include "makemhr.h"
 #include "polyphase_resampler.h"
 #include "sofa-support.h"
@@ -53,10 +51,13 @@
 
 #if HAVE_CXXMODULES
 import alstring;
+import common.std;
 import filesystem;
 import fmtlib;
 import gsl;
+#include "gsl_macros.hpp"
 #else
+#include <iostream>
 #include "alstring.h"
 #include "filesystem.h"
 #include "fmt/base.h"

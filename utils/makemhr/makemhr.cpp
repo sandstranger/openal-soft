@@ -72,7 +72,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <iostream>
 #include <limits>
 #include <memory>
 #include <numbers>
@@ -84,7 +83,6 @@
 #include <vector>
 
 #include "alcomplex.h"
-#include "gsl/assert"
 #include "loaddef.h"
 #include "loadsofa.h"
 
@@ -92,12 +90,15 @@
 
 #if HAVE_CXXMODULES
 import alstring;
+import common.std;
 import filesystem;
 import fmtlib;
 import gsl;
 import numeric;
 import zstring_view;
+#include "gsl_macros.hpp"
 #else
+#include <iostream>
 #include "alformatzsv.hpp"
 #include "alstring.h"
 #include "filesystem.h"

@@ -3,6 +3,16 @@
 cmake_minimum_required(VERSION 3.13...3.31)
 enable_testing()
 
+if(POLICY CMP0219)
+    # CMP0219: macro() invocations preserve backslashes in arguments.
+    # CMake 4.4+ prefers to preserve backslashes through macro() invocations,
+    # where this policy was added, but as long as we support earlier versions
+    # of CMake, this can't be set to NEW since there's no way to compensate for
+    # backslashes in those earlier versions without adversely affecting newer
+    # versions.
+    cmake_policy(SET CMP0219 OLD)
+endif()
+
 if(APPLE)
     # The workaround for try_compile failing with code signing
     # since cmake-3.18.2, not required
@@ -750,16 +760,18 @@ set(COMMON_HDRS
     common/filesystem.h
     common/flexarray.h
     common/ghc_filesystem.h
+    common/gsl_macros.hpp
     common/inout_ptr.hpp
     common/instance_of.hpp
     common/intrusive_ptr.h
     common/numeric.hpp
+    common/openal_apientry.h
     common/opthelper_macros.hpp
     common/opthelpers.h
     common/pffft.h
     common/polyphase_resampler.h
     common/pragmadefs.h
-    common/ringbuffer.h
+    common/ringbuffer.hpp
     common/spanstream.hpp
     common/vecmat.h
     common/vector.h
@@ -780,13 +792,16 @@ if(HAVE_CXXMODULES)
     list(APPEND COMMON_MODS
         alsoft-modules/fmtlib.cppm
         alsoft-modules/gsl.cppm
+        alsoft-modules/std.cppm
         common/alformat.cppm
         common/alstring.cppm
         common/cemath.cppm
         common/filesystem.cppm
         common/hann_window.cppm
+        common/inout_ptr.cppm
         common/numeric.cppm
         common/phase_shifter.cppm
+        common/ringbuffer.cppm
         common/spanstream.cppm
         common/zstring_view.cppm
     )
@@ -804,7 +819,6 @@ endif()
 set(CORE_MODS )
 set(CORE_SRCS
     core/ambdec.cpp
-    core/ambidefs.cpp
     core/bformatdec.cpp
     core/bs2b.cpp
     core/context.cpp
@@ -835,6 +849,7 @@ set(CORE_HDRS
     core/allpass_iir.hpp
     core/ambdec.h
     core/ambidefs.h
+    core/ambi_utils.hpp
     core/async_event.h
     core/bformatdec.h
     core/bs2b.h
@@ -875,13 +890,17 @@ set(CORE_HDRS
     core/voice_change.h)
 if(HAVE_CXXMODULES)
     list(APPEND CORE_MODS
+        core/ambi_utils.cppm
         core/bsinc_tables.cppm
+        core/buffer_storage.cppm
         core/context.cppm
         core/cubic_tables.cppm
         core/device.cppm
+        core/effectslot.cppm
         core/helpers.cppm
         core/hrtfstore.cppm
-        core/logging.cppm)
+        core/logging.cppm
+        core/voice.cppm)
 else()
     list(APPEND CORE_HDRS
         core/helpers.hpp
@@ -978,6 +997,9 @@ set(OPENAL_HDRS
     al/filter.h
     al/listener.h
     al/source.h)
+if(HAVE_CXXMODULES)
+    list(APPEND CORE_MODS  al/iface.cppm)
+endif()
 
 # ALC and related routines
 set(ALC_SRCS
@@ -1857,8 +1879,8 @@ else()
     # FIXME: Can't have the modules as part of ${IMPL_TARGET} directly for some
     # reason, causing problems with the private alsoft.common and alsoft.fmt
     # libs, so they're added through this target to work around the bug.
-    if(TARGET alsoft.core-modules)
-        target_link_libraries(${IMPL_TARGET} PRIVATE alsoft.core-modules)
+    if(HAVE_CXXMODULES)
+        target_link_libraries(${IMPL_TARGET} PRIVATE alsoft::buildapi-modules alsoft.core-modules)
     endif()
 
     if(ALSOFT_UWP)

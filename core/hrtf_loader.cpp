@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <bit>
-#include <istream>
 #include <iterator>
 #include <ranges>
 #include <span>
@@ -12,22 +11,26 @@
 
 #include "hrtf_loader.hpp"
 
-#include "gsl/gsl"
 #include "hrtf.h"
 #include "opthelpers.h"
 #include "zudl.hpp"
 
 #if HAVE_CXXMODULES
+import common.std;
 import fmtlib;
 import format;
+import gsl;
 import hrtfstore;
 import logging;
 import numeric;
+#include "gsl_macros.hpp"
 #else
+#include <istream>
 #include "alformat.hpp"
 #include "core/hrtfstore.hpp"
 #include "fmt/format.h"
 #include "fmt/ranges.h"
+#include "gsl/gsl"
 #include "logging.h"
 #include "numeric.hpp"
 #endif
@@ -751,7 +754,6 @@ auto LoadHrtf03(std::istream &data) -> std::unique_ptr<HrtfStore>
 
     return CreateHrtfStore(rate, irSize, fields, elevs, coeffs, delays);
 }
-
 
 } // namespace
 

@@ -1,7 +1,5 @@
 #include "config.h"
 
-#include "debug.h"
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -19,21 +17,16 @@
 #include <unordered_map>
 #include <utility>
 
-#include "AL/al.h"
-#include "AL/alext.h"
-
-#include "auxeffectslot.h"
-#include "buffer.h"
 #include "core/except.h"
-#include "core/voice.h"
 #include "direct_defs.h"
-#include "effect.h"
-#include "filter.h"
 #include "opthelpers.h"
-#include "source.h"
 #include "zudl.hpp"
 
 #if HAVE_CXXMODULES
+import openal;
+#include "openal_apientry.h"
+
+import al.iface;
 import alc.context;
 import alc.device;
 import format;
@@ -42,6 +35,15 @@ import logging;
 import numeric;
 import zstring_view;
 #else
+#include "AL/al.h"
+#include "AL/alext.h"
+
+#include "al/auxeffectslot.h"
+#include "al/buffer.h"
+#include "al/debug.h"
+#include "al/effect.h"
+#include "al/filter.h"
+#include "al/source.h"
 #include "alc/context.hpp"
 #include "alc/device.h"
 #include "alformat.hpp"

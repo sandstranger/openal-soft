@@ -62,18 +62,6 @@
 #include <utility>
 #include <vector>
 
-#include "AL/al.h"
-#include "AL/alc.h"
-#include "AL/alext.h"
-#include "AL/efx.h"
-
-#include "al/auxeffectslot.h"
-#include "al/buffer.h"
-#include "al/debug.h"
-#include "al/eax/effect.h"
-#include "al/effect.h"
-#include "al/filter.h"
-#include "al/source.h"
 #include "alc/events.h"
 #include "alconfig.h"
 #include "alu.h"
@@ -92,13 +80,11 @@
 #include "core/mastering.h"
 #include "core/tsmefilter.hpp"
 #include "core/uhjfilter.h"
-#include "core/voice.h"
 #include "core/voice_change.h"
 #include "effects/base.h"
 #include "envutils.hpp"
 #include "export_list.h"
 #include "flexarray.h"
-#include "gsl/gsl"
 #include "inprogext.h"
 #include "intrusive_ptr.h"
 #include "opthelpers.h"
@@ -161,6 +147,7 @@
 
 #if ALSOFT_EAX
 #include "al/eax/api.h"
+#include "al/eax/effect.h"
 #include "al/eax/globals.h"
 #endif
 
@@ -172,16 +159,33 @@
 #if !defined(__INTEL_COMPILER) && !defined(__clang__) && defined(__GNUC__) && __GNUC__ == 16
 #include "alc/device.h"
 #endif
+import openal;
+
+import al.iface;
 import alc.context;
 import alc.device;
 import alstring;
 import backends.exception;
 import core.helpers;
+import core.voice;
 import fmtlib;
 import format;
+import gsl;
 import logging;
 import numeric;
+#include "gsl_macros.hpp"
 #else
+#include "AL/al.h"
+#include "AL/alc.h"
+#include "AL/alext.h"
+#include "AL/efx.h"
+
+#include "al/auxeffectslot.h"
+#include "al/buffer.h"
+#include "al/debug.h"
+#include "al/effect.h"
+#include "al/filter.h"
+#include "al/source.h"
 #include "alc/backends/exception.hpp"
 #include "alc/context.hpp"
 #include "alc/device.h"
@@ -189,8 +193,10 @@ import numeric;
 #include "alstring.h"
 #include "core/helpers.hpp"
 #include "core/logging.h"
+#include "core/voice.h"
 #include "fmt/format.h"
 #include "fmt/ranges.h"
+#include "gsl/gsl"
 #include "numeric.hpp"
 #endif
 
@@ -458,10 +464,9 @@ void alc_initconfig()
     TRACE("Initializing library v{}-{} {}", ALSOFT_VERSION,
         std::string_view{ALSOFT_GIT_COMMIT_HASH}.empty() ? "unknown" : ALSOFT_GIT_COMMIT_HASH,
         std::string_view{ALSOFT_GIT_BRANCH}.empty() ? "unknown" : ALSOFT_GIT_BRANCH);
-    {
-        auto const names = BackendList | std::views::transform(&BackendInfo::name);
-        TRACE("{}", fmt::format("Supported backends: {}", fmt::join(names, ", ")));
-    }
+    TRACE("{}", fmt::format("Supported backends: {}",
+        fmt::join(BackendList | std::views::transform(&BackendInfo::name), ", ")));
+
     ReadALConfig();
 
     if(auto const suspendmode = al::getenv("__ALSOFT_SUSPEND_CONTEXT"))
@@ -768,15 +773,16 @@ void alc_initconfig()
     else
         eax_g_is_enabled = true;
 
-    if((DisabledEffects.test(EAXREVERB_EFFECT) || DisabledEffects.test(CHORUS_EFFECT))
-        && eax_g_is_enabled)
+    if((DisabledEffects.test(EffectTypeFlag::EaxReverb)
+            || DisabledEffects.test(EffectTypeFlag::Chorus)) && eax_g_is_enabled)
     {
         eax_g_is_enabled = false;
         TRACE("EAX disabled because {} disabled.",
-            (DisabledEffects.test(EAXREVERB_EFFECT) && DisabledEffects.test(CHORUS_EFFECT))
+            (DisabledEffects.test(EffectTypeFlag::EaxReverb)
+                && DisabledEffects.test(EffectTypeFlag::Chorus))
                 ? "EAXReverb and Chorus are"sv :
-            DisabledEffects.test(EAXREVERB_EFFECT) ? "EAXReverb is"sv :
-            DisabledEffects.test(CHORUS_EFFECT) ? "Chorus is"sv : ""sv);
+            DisabledEffects.test(EffectTypeFlag::EaxReverb) ? "EAXReverb is"sv :
+            DisabledEffects.test(EffectTypeFlag::Chorus) ? "Chorus is"sv : ""sv);
     }
 
     if(eax_g_is_enabled)
@@ -960,7 +966,7 @@ auto EnumFromDevFmt(DevFmtType const type) -> ALCenum
     case DevFmtUInt: return ALC_UNSIGNED_INT_SOFT;
     case DevFmtFloat: return ALC_FLOAT_SOFT;
     }
-    throw std::runtime_error{al::format("Invalid DevFmtType: {}", int{al::to_underlying(type)})};
+    throw std::runtime_error{al::format("Invalid DevFmtType: {:#x}", al::to_underlying(type))};
 }
 
 auto DevFmtChannelsFromEnum(ALCenum const channels) -> std::optional<DevFmtChannels>
@@ -995,8 +1001,8 @@ auto EnumFromDevFmt(DevFmtChannels const channels) -> ALCenum
     case DevFmtX3D71:
         break;
     }
-    throw std::runtime_error{al::format("Invalid DevFmtChannels: {}",
-        int{al::to_underlying(channels)})};
+    throw std::runtime_error{al::format("Invalid DevFmtChannels: {:#x}",
+        al::to_underlying(channels))};
 }
 
 auto DevAmbiLayoutFromEnum(ALCenum const layout) -> std::optional<DevAmbiLayout>
@@ -1016,8 +1022,8 @@ auto EnumFromDevAmbi(DevAmbiLayout const layout) -> ALCenum
     case DevAmbiLayout::FuMa: return ALC_FUMA_SOFT;
     case DevAmbiLayout::ACN: return ALC_ACN_SOFT;
     }
-    throw std::runtime_error{al::format("Invalid DevAmbiLayout: {}",
-        int{al::to_underlying(layout)})};
+    throw std::runtime_error{al::format("Invalid DevAmbiLayout: {:#x}",
+        al::to_underlying(layout))};
 }
 
 auto DevAmbiScalingFromEnum(ALCenum const scaling) -> std::optional<DevAmbiScaling>
@@ -1039,8 +1045,8 @@ auto EnumFromDevAmbi(DevAmbiScaling const scaling) -> ALCenum
     case DevAmbiScaling::SN3D: return ALC_SN3D_SOFT;
     case DevAmbiScaling::N3D: return ALC_N3D_SOFT;
     }
-    throw std::runtime_error{al::format("Invalid DevAmbiScaling: {}",
-        int{al::to_underlying(scaling)})};
+    throw std::runtime_error{al::format("Invalid DevAmbiScaling: {:#x}",
+        al::to_underlying(scaling))};
 }
 
 
@@ -1180,7 +1186,7 @@ auto UpdateDeviceParams(al::Device& device, std::span<AttributePair const> const
             optsrate = std::clamp<unsigned>(*freqopt, MinOutputRate, MaxOutputRate);
 
             auto const scale = gsl::narrow_cast<double>(*optsrate) / double{DefaultOutputRate};
-            period_size = gsl::narrow_cast<ALCuint>(std::lround(period_size * scale));
+            period_size = al::saturating_round<ALCuint>(period_size * scale);
         }
 
         if(auto persizeopt = device.configValue<unsigned>({}, "period_size"))
@@ -1196,19 +1202,19 @@ auto UpdateDeviceParams(al::Device& device, std::span<AttributePair const> const
                 std::string_view name;
                 DevFmtType type;
             };
-            constexpr std::array typelist{
-                TypeMap{"int8"sv,    DevFmtByte  },
-                TypeMap{"uint8"sv,   DevFmtUByte },
-                TypeMap{"int16"sv,   DevFmtShort },
-                TypeMap{"uint16"sv,  DevFmtUShort},
-                TypeMap{"int32"sv,   DevFmtInt   },
-                TypeMap{"uint32"sv,  DevFmtUInt  },
-                TypeMap{"float32"sv, DevFmtFloat },
-            };
+            auto constexpr typelist = std::to_array<TypeMap>({
+                {.name="int8"sv,    .type=DevFmtByte  },
+                {.name="uint8"sv,   .type=DevFmtUByte },
+                {.name="int16"sv,   .type=DevFmtShort },
+                {.name="uint16"sv,  .type=DevFmtUShort},
+                {.name="int32"sv,   .type=DevFmtInt   },
+                {.name="uint32"sv,  .type=DevFmtUInt  },
+                {.name="float32"sv, .type=DevFmtFloat },
+            });
 
             const auto iter = std::ranges::find_if(typelist,
-                [svfmt=std::string_view{*typeopt}](TypeMap const &entry) -> bool
-                { return al::ci_equal(entry.name, svfmt); });
+                [svfmt=std::string_view{*typeopt}](std::string_view const entry) -> bool
+                { return al::ci_equal(entry, svfmt); }, &TypeMap::name);
             if(iter == typelist.end())
                 ERR("Unsupported sample-type: {}", *typeopt);
             else
@@ -1222,26 +1228,26 @@ auto UpdateDeviceParams(al::Device& device, std::span<AttributePair const> const
                 DevFmtChannels chans;
                 std::uint8_t order;
             };
-            constexpr auto chanlist = std::array{
-                ChannelMap{"mono"sv,       DevFmtMono,   0},
-                ChannelMap{"stereo"sv,     DevFmtStereo, 0},
-                ChannelMap{"quad"sv,       DevFmtQuad,   0},
-                ChannelMap{"surround51"sv, DevFmtX51,    0},
-                ChannelMap{"surround61"sv, DevFmtX61,    0},
-                ChannelMap{"surround71"sv, DevFmtX71,    0},
-                ChannelMap{"3d71"sv,         DevFmtX3D71, 0},
-                ChannelMap{"surround714"sv,  DevFmtX714,  0},
-                ChannelMap{"surround7144"sv, DevFmtX7144, 0},
-                ChannelMap{"ambi1"sv, DevFmtAmbi3D, 1},
-                ChannelMap{"ambi2"sv, DevFmtAmbi3D, 2},
-                ChannelMap{"ambi3"sv, DevFmtAmbi3D, 3},
-                ChannelMap{"ambi4"sv, DevFmtAmbi3D, 4},
-                ChannelMap{"surround51rear"sv, DevFmtX51, 0},
-            };
+            auto constexpr chanlist = std::to_array<ChannelMap>({
+                {.name="mono"sv,       .chans=DevFmtMono,   .order=0},
+                {.name="stereo"sv,     .chans=DevFmtStereo, .order=0},
+                {.name="quad"sv,       .chans=DevFmtQuad,   .order=0},
+                {.name="surround51"sv, .chans=DevFmtX51,    .order=0},
+                {.name="surround61"sv, .chans=DevFmtX61,    .order=0},
+                {.name="surround71"sv, .chans=DevFmtX71,    .order=0},
+                {.name="3d71"sv,         .chans=DevFmtX3D71, .order=0},
+                {.name="surround714"sv,  .chans=DevFmtX714,  .order=0},
+                {.name="surround7144"sv, .chans=DevFmtX7144, .order=0},
+                {.name="ambi1"sv, .chans=DevFmtAmbi3D, .order=1},
+                {.name="ambi2"sv, .chans=DevFmtAmbi3D, .order=2},
+                {.name="ambi3"sv, .chans=DevFmtAmbi3D, .order=3},
+                {.name="ambi4"sv, .chans=DevFmtAmbi3D, .order=4},
+                {.name="surround51rear"sv, .chans=DevFmtX51, .order=0},
+            });
 
             const auto iter = std::ranges::find_if(chanlist,
-                [svfmt=std::string_view{*chanopt}](ChannelMap const &entry) -> bool
-                { return al::ci_equal(entry.name, svfmt); });
+                [svfmt=std::string_view{*chanopt}](std::string_view const entry) -> bool
+                { return al::ci_equal(entry, svfmt); }, &ChannelMap::name);
             if(iter == chanlist.end())
                 ERR("Unsupported channels: {}", *chanopt);
             else
@@ -1258,28 +1264,29 @@ auto UpdateDeviceParams(al::Device& device, std::span<AttributePair const> const
         }
         if(auto ambiopt = device.configValue<std::string>({}, "ambi-format"sv))
         {
-            if(al::ci_equal(*ambiopt, "fuma"sv))
-            {
-                optlayout = DevAmbiLayout::FuMa;
-                optscale = DevAmbiScaling::FuMa;
-            }
-            else if(al::ci_equal(*ambiopt, "acn+fuma"sv))
-            {
-                optlayout = DevAmbiLayout::ACN;
-                optscale = DevAmbiScaling::FuMa;
-            }
-            else if(al::ci_equal(*ambiopt, "ambix"sv) or al::ci_equal(*ambiopt, "acn+sn3d"sv))
-            {
-                optlayout = DevAmbiLayout::ACN;
-                optscale = DevAmbiScaling::SN3D;
-            }
-            else if(al::ci_equal(*ambiopt, "acn+n3d"sv))
-            {
-                optlayout = DevAmbiLayout::ACN;
-                optscale = DevAmbiScaling::N3D;
-            }
-            else
+            struct FormatMap {
+                std::string_view name;
+                DevAmbiLayout layout;
+                DevAmbiScaling scaling;
+            };
+            auto constexpr ambimap = std::to_array<FormatMap>({
+                {.name="fuma"sv, .layout=DevAmbiLayout::FuMa, .scaling=DevAmbiScaling::FuMa},
+                {.name="anc+fuma"sv, .layout=DevAmbiLayout::ACN, .scaling=DevAmbiScaling::FuMa},
+                {.name="ambix"sv, .layout=DevAmbiLayout::ACN, .scaling=DevAmbiScaling::SN3D},
+                {.name="acn+sn3d"sv, .layout=DevAmbiLayout::ACN, .scaling=DevAmbiScaling::SN3D},
+                {.name="acn+n3d"sv, .layout=DevAmbiLayout::ACN, .scaling=DevAmbiScaling::N3D},
+            });
+
+            auto const iter = std::ranges::find_if(ambimap,
+                [svfmt=std::string_view{*ambiopt}](std::string_view const entry) -> bool
+                { return al::ci_equal(entry, svfmt); }, &FormatMap::name);
+            if(iter == ambimap.end())
                 ERR("Unsupported ambi-format: {}", *ambiopt);
+            else
+            {
+                optlayout = iter->layout;
+                optscale = iter->scaling;
+            }
         }
 
         if(aorder > 3 && (optlayout == DevAmbiLayout::FuMa || optscale == DevAmbiScaling::FuMa))
@@ -1508,9 +1515,9 @@ auto UpdateDeviceParams(al::Device& device, std::span<AttributePair const> const
                 freqAttr = std::clamp<int>(freqAttr, MinOutputRate, MaxOutputRate);
 
                 const auto scale = gsl::narrow_cast<double>(freqAttr) / oldrate;
-                period_size = gsl::narrow_cast<ALCuint>(std::lround(period_size * scale));
-                buffer_size = gsl::narrow_cast<ALCuint>(std::lround(buffer_size * scale));
-                optsrate = gsl::narrow_cast<ALCuint>(freqAttr);
+                period_size = al::saturating_round<ALCuint>(period_size * scale);
+                buffer_size = al::saturating_round<ALCuint>(buffer_size * scale);
+                optsrate = gsl::narrow<ALCuint>(freqAttr);
             }
         }
 
@@ -1752,7 +1759,7 @@ auto UpdateDeviceParams(al::Device& device, std::span<AttributePair const> const
         TRACE("Dithering disabled");
     else
         TRACE("Dithering enabled ({}-bit, {:g})",
-            al::saturating_cast<int>(std::log2(device.DitherDepth)+0.5f)+1, device.DitherDepth);
+            al::saturating_round<int>(std::log2(device.DitherDepth))+1, device.DitherDepth);
 
     if(!optlimit)
         optlimit = device.configValue<bool>({}, "output-limiter");

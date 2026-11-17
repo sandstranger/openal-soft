@@ -42,7 +42,6 @@
 #include "alconfig.h"
 #include "alu.h"
 #include "core/ambdec.h"
-#include "core/ambidefs.h"
 #include "core/bformatdec.h"
 #include "core/bs2b.h"
 #include "core/effectslot.h"
@@ -69,14 +68,17 @@
 import alc.context;
 import alc.device;
 import alstring;
+import core.ambi_utils;
 import gsl;
 import hrtfstore;
 import logging;
 import numeric;
+#include "gsl_macros.hpp"
 #else
 #include "alc/context.hpp"
 #include "alc/device.h"
 #include "alstring.h"
+#include "core/ambi_utils.hpp"
 #include "core/hrtfstore.hpp"
 #include "core/logging.h"
 #include "gsl/gsl"
@@ -413,7 +415,6 @@ auto MakeDecoderView(al::Device const *const device, AmbDecConf const *const con
 
     switch(conf->CoeffScale)
     {
-    case AmbDecScale::Unset: ASSUME(false); break;
     case AmbDecScale::N3D: decoder.mScaling = DevAmbiScaling::N3D; break;
     case AmbDecScale::SN3D: decoder.mScaling = DevAmbiScaling::SN3D; break;
     case AmbDecScale::FuMa: decoder.mScaling = DevAmbiScaling::FuMa; break;

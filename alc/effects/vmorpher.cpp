@@ -251,7 +251,8 @@ void VmorpherState::update(const ContextBase *context, const EffectSlotBase *slo
     auto const &device = context->mDevice;
     const auto frequency = static_cast<float>(device.mSampleRate);
     const auto step = props.Rate / frequency;
-    mStep = fastf2u(std::clamp(step*WaveformFracOne, 0.0f, WaveformFracOne-1.0f));
+    mStep = std::min(al::saturating_round<unsigned>(step * WaveformFracOne),
+        unsigned{WaveformFracOne-1});
 
     if(mStep == 0)
         mGetSamples = Oscillate<Half>;
@@ -329,7 +330,7 @@ void VmorpherState::process(const size_t samplesToDo,
             vowelB[3].process(&input[base], mSampleBufferB.data(), td);
 
             for(auto i=0_uz;i < td;++i)
-                blended[i] = lerpf(mSampleBufferA[i], mSampleBufferB[i], mLfo[i]);
+                blended[i] = al::lerp(mSampleBufferA[i], mSampleBufferB[i], mLfo[i]);
 
             /* Now, mix the processed sound data to the output. */
             MixSamples(std::span{blended}.first(td), std::span{samplesOut[outidx]}.subspan(base),
@@ -349,8 +350,8 @@ struct VmorpherStateFactory final : public EffectStateFactory {
 
 } // namespace
 
-auto VmorpherStateFactory_getFactory() -> gsl::not_null<EffectStateFactory*>
+auto VmorpherStateFactory_getFactory() -> EffectStateFactory&
 {
-    static VmorpherStateFactory VmorpherFactory{};
-    return gsl::make_not_null(&VmorpherFactory);
+    static auto VmorpherFactory = VmorpherStateFactory{};
+    return VmorpherFactory;
 }

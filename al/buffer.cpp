@@ -20,8 +20,6 @@
 
 #include "config.h"
 
-#include "buffer.h"
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -40,19 +38,19 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
-
-#include "AL/al.h"
-#include "AL/alext.h"
 
 #include "alc/inprogext.h"
 #include "almalloc.h"
 #include "core/except.h"
+#include "core/fmt_traits.h"
 #include "core/resampler_limits.hpp"
-#include "core/voice.h"
+#include "core/storage_formats.h"
 #include "direct_defs.h"
 #include "intrusive_ptr.h"
 #include "opthelpers.h"
+#include "vector.h"
 #include "zudl.hpp"
 
 #if ALSOFT_EAX
@@ -63,24 +61,46 @@
 #endif // ALSOFT_EAX
 
 #if HAVE_CXXMODULES
+/* HACK: GCC 16 has an issue with declaring std::array<al::Buffer, 64> after
+ * the module imports.
+ */
+#if !defined(__clang__) && defined(__GNUC__) && __GNUC__ <= 16
+#include "al/buffer.h"
+namespace {
+    using SubListAllocator = al::allocator<std::array<al::Buffer, 64>>;
+}
+#define BUFFER_SUBLIST_HACK
+#endif
+
+import openal;
+
+import al.iface;
 import alc.context;
 import alc.device;
+import core.voice;
 import format;
 import gsl;
 import logging;
 import numeric;
 #else
+#include "AL/al.h"
+#include "AL/alext.h"
+
+#include "al/buffer.h"
 #include "alc/context.hpp"
 #include "alc/device.h"
 #include "alformat.hpp"
 #include "core/logging.h"
+#include "core/voice.h"
 #include "gsl/gsl"
 #include "numeric.hpp"
 #endif
 
 namespace {
 
-using SubListAllocator = al::allocator<std::array<al::Buffer,64>>;
+#if !defined(BUFFER_SUBLIST_HACK)
+using SubListAllocator = al::allocator<std::array<al::Buffer, 64>>;
+#endif
 
 constexpr auto AmbiLayoutFromEnum(ALenum const layout) noexcept -> std::optional<AmbiLayout>
 {

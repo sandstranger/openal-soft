@@ -30,7 +30,6 @@
 #include "alc/alconfig.h"
 #include "dlopennote.h"
 #include "dynload.h"
-#include "ringbuffer.h"
 #include "zudl.hpp"
 
 #include <portaudio.h>
@@ -40,6 +39,8 @@ import backends.exception;
 import core.device;
 import gsl;
 import logging;
+import numeric;
+import ringbuffer;
 import zstring_view;
 #else
 #include "alc/backends/exception.hpp"
@@ -47,6 +48,8 @@ import zstring_view;
 #include "core/device.h"
 #include "core/logging.h"
 #include "gsl/gsl"
+#include "numeric.hpp"
+#include "ringbuffer.hpp"
 #endif
 
 
@@ -273,17 +276,17 @@ bool PortPlayback::reset()
     }
 
     const auto *streamInfo = Pa_GetStreamInfo(mStream);
-    mDevice.mSampleRate = gsl::narrow_cast<unsigned>(std::lround(streamInfo->sampleRate));
+    mDevice.mSampleRate = al::saturating_round<unsigned>(streamInfo->sampleRate);
     mDevice.mUpdateSize = mParams.updateSize;
     mDevice.mBufferSize = mDevice.mUpdateSize * 2u;
     if(streamInfo->outputLatency > 0.0f)
     {
-        const auto sampleLatency = streamInfo->outputLatency * streamInfo->sampleRate;
-        TRACE("Reported stream latency: {:f} sec ({:f} samples)", streamInfo->outputLatency,
+        const auto sampleLatency = al::saturating_round<unsigned>(streamInfo->outputLatency
+            * streamInfo->sampleRate);
+        TRACE("Reported stream latency: {:f} sec ({} samples)", streamInfo->outputLatency,
             sampleLatency);
-        mDevice.mBufferSize = gsl::narrow_cast<unsigned>(std::clamp(sampleLatency,
-            gsl::narrow_cast<double>(mDevice.mBufferSize),
-            double{std::numeric_limits<int>::max()}));
+        mDevice.mBufferSize = std::clamp(sampleLatency, mDevice.mBufferSize,
+            unsigned{std::numeric_limits<int>::max()});
     }
 
     setDefaultChannelOrder();

@@ -7,8 +7,6 @@
 #include <mutex>
 #include <thread>
 
-#include "ringbuffer.h"
-
 #include "oboe/Oboe.h"
 
 #if HAVE_CXXMODULES
@@ -18,6 +16,7 @@ import core.device;
 import gsl;
 import logging;
 import numeric;
+import ringbuffer;
 #else
 #include "alc/backends/exception.hpp"
 #include "alstring.h"
@@ -25,6 +24,7 @@ import numeric;
 #include "core/logging.h"
 #include "gsl/gsl"
 #include "numeric.hpp"
+#include "ringbuffer.hpp"
 #endif
 
 

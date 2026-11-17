@@ -1,26 +1,24 @@
-#ifndef RINGBUFFER_H
-#define RINGBUFFER_H
+#ifndef RINGBUFFER_HPP
+#define RINGBUFFER_HPP
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <bit>
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <new>
-#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
 
 #include "flexarray.h"
-#include "gsl/gsl"
+#include "gsl/pointers"
 #include "opthelper_macros.hpp"
 #include "zudl.hpp"
 
 
-/* NOTE: This lockless ringbuffer implementation is copied from JACK, extended
+/* NOTE: This lockless ringbuffer implementation is adapted from JACK, extended
  * to include a storage type and an element size. Consequently, parameters and
  * return values for a size or count are in 'elements', not bytes. Also, it
  * only supports single-consumer/single-provider operation.
@@ -92,9 +90,9 @@ public:
         const auto [n1, n2] = (rdend <= mSizeMask+1) ? std::array{to_read, 0_uz}
             : std::array{mSizeMask+1 - read_idx, rdend&mSizeMask};
 
-        auto outiter = std::ranges::copy(mBuffer | std::views::drop(read_idx*mElemSize)
-            | std::views::take(n1*mElemSize), dest.begin()).out;
-        std::ranges::copy(mBuffer | std::views::take(n2*mElemSize), outiter);
+        auto outiter = std::ranges::copy(mBuffer.subspan(read_idx*mElemSize, n1*mElemSize),
+            dest.begin()).out;
+        std::ranges::copy(mBuffer.first(n2*mElemSize), outiter);
         mReadCount.store(r+n1+n2, std::memory_order_release);
         return to_read;
     }
@@ -118,9 +116,9 @@ public:
         const auto [n1, n2] = (rdend <= mSizeMask+1) ? std::array{to_read, 0_uz}
             : std::array{mSizeMask+1 - read_idx, rdend&mSizeMask};
 
-        auto outiter = std::ranges::copy(mBuffer | std::views::drop(read_idx*mElemSize)
-            | std::views::take(n1*mElemSize), dest.begin()).out;
-        std::ranges::copy(mBuffer | std::views::take(n2*mElemSize), outiter);
+        auto outiter = std::ranges::copy(mBuffer.subspan(read_idx*mElemSize, n1*mElemSize),
+            dest.begin()).out;
+        std::ranges::copy(mBuffer.first(n2*mElemSize), outiter);
 
         return to_read;
     }
@@ -143,10 +141,10 @@ public:
             /* Two part vector: the rest of the buffer after the current read
              * ptr, plus some from the start of the buffer.
              */
-            return DataPair{std::span{mBuffer}.subspan(read_idx*mElemSize),
-                std::span{mBuffer}.first((rdend&mSizeMask)*mElemSize)};
+            return DataPair{mBuffer.subspan(read_idx*mElemSize),
+                mBuffer.first((rdend&mSizeMask)*mElemSize)};
         }
-        return DataPair{std::span{mBuffer}.subspan(read_idx*mElemSize, readable*mElemSize), {}};
+        return DataPair{mBuffer.subspan(read_idx*mElemSize, readable*mElemSize), {}};
     }
 
     /** Advance the read pointer `count' places. */
@@ -185,8 +183,7 @@ public:
         const auto [n1, n2] = (wrend <= mSizeMask+1) ? std::array{to_write, 0_uz}
             : std::array{mSizeMask+1 - write_idx, wrend&mSizeMask};
 
-        std::ranges::copy(src.first(n1*mElemSize),
-            (mBuffer | std::views::drop(write_idx*mElemSize)).begin());
+        std::ranges::copy(src.first(n1*mElemSize), mBuffer.subspan(write_idx*mElemSize).begin());
         std::ranges::copy(src.subspan(n1*mElemSize, n2*mElemSize), mBuffer.begin());
         mWriteCount.store(w+n1+n2, std::memory_order_release);
         return to_write;
@@ -210,10 +207,10 @@ public:
             /* Two part vector: the rest of the buffer after the current write
              * ptr, plus some from the start of the buffer.
              */
-            return DataPair{std::span{mBuffer}.subspan(write_idx*mElemSize),
-                std::span{mBuffer}.first((wrend&mSizeMask)*mElemSize)};
+            return DataPair{mBuffer.subspan(write_idx*mElemSize),
+                mBuffer.first((wrend&mSizeMask)*mElemSize)};
         }
-        return DataPair{std::span{mBuffer}.subspan(write_idx*mElemSize, writable*mElemSize), {}};
+        return DataPair{mBuffer.subspan(write_idx*mElemSize, writable*mElemSize), {}};
     }
 
     /** Advance the write pointer `count' places. */
@@ -256,8 +253,8 @@ template<typename T>
 using RingBufferPtr = std::unique_ptr<RingBuffer<T>>;
 
 
-/* A FIFO buffer, modelled after the above but retains type information, and
- * can work with non-trivial types, and does not support multiple values per
+/* A FIFO buffer, modeled after the above but retains type information, and can
+ * work with non-trivial types, and does not support multiple values per
  * element. Unreadable elements are in a destructed state.
  */
 template<typename T>
@@ -545,4 +542,4 @@ public:
 template<typename T>
 using FifoBufferPtr = std::unique_ptr<FifoBuffer<T>, typename FifoBuffer<T>::Deleter>;
 
-#endif /* RINGBUFFER_H */
+#endif /* RINGBUFFER_HPP */

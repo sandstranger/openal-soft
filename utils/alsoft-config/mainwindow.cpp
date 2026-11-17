@@ -24,8 +24,19 @@
 #include <shlobj.h>
 #endif
 
+#if HAVE_CXXMODULES
+import gsl;
+import numeric;
+#ifdef _WIN32
+import inout_ptr;
+#endif
+#else
 #include "gsl/gsl"
+#include "numeric.hpp"
+#ifdef _WIN32
 #include "inout_ptr.hpp"
+#endif
+#endif
 
 namespace {
 
@@ -1268,7 +1279,7 @@ void MainWindow::updateJackBufferSizeEdit(int size)
 void MainWindow::updateJackBufferSizeSlider()
 {
     const auto value = ui->jackBufferSizeLine->text().toInt();
-    const auto pos = static_cast<int>(floor(log2(value) + 0.5));
+    const auto pos = al::saturating_round<int>(std::log2(value));
     ui->jackBufferSizeSlider->setSliderPosition(pos);
     enableApplyButton();
 }

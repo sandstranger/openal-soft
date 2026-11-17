@@ -34,7 +34,6 @@
 #include <vector>
 
 #include "alc/effects/base.h"
-#include "core/ambidefs.h"
 #include "core/bufferline.h"
 #include "core/effects/base.h"
 #include "core/effectslot.h"
@@ -47,11 +46,13 @@
 #include "zudl.hpp"
 
 #if HAVE_CXXMODULES
+import core.ambi_utils;
 import core.context;
 import core.device;
 import cubic_tables;
 import numeric;
 #else
+#include "core/ambi_utils.hpp"
 #include "core/context.h"
 #include "core/cubic_tables.hpp"
 #include "core/device.h"
@@ -270,8 +271,9 @@ void ChorusState::calcTriangleDelays(const size_t todo)
 
     auto gen_lfo = [lfo_scale,depth,delay](unsigned const offset) -> unsigned
     {
-        const float offset_norm{static_cast<float>(offset) * lfo_scale};
-        return static_cast<unsigned>(fastf2i((1.0f-std::abs(2.0f-offset_norm)) * depth) + delay);
+        auto const offset_norm = static_cast<float>(offset) * lfo_scale;
+        auto const lfo = al::saturating_cast<int>((1.0f-std::abs(2.0f-offset_norm)) * depth);
+        return static_cast<unsigned>(lfo + delay);
     };
 
     auto offset = mLfoOffset;
@@ -279,8 +281,8 @@ void ChorusState::calcTriangleDelays(const size_t todo)
     auto ldelays = mModDelays[0].begin();
     for(size_t i{0};i < todo;)
     {
-        const auto rem = std::min(todo-i, size_t{lfo_range-offset});
-        ldelays = std::generate_n(ldelays, rem, [&offset,gen_lfo] { return gen_lfo(offset++); });
+        const auto rem = std::min(todo-i, std::size_t{lfo_range-offset});
+        ldelays = std::generate_n(ldelays, rem, [&offset, gen_lfo]{ return gen_lfo(offset++); });
         if(offset == lfo_range) offset = 0;
         i += rem;
     }
@@ -289,8 +291,8 @@ void ChorusState::calcTriangleDelays(const size_t todo)
     auto rdelays = mModDelays[1].begin();
     for(size_t i{0};i < todo;)
     {
-        const auto rem = std::min(todo-i, size_t{lfo_range-offset});
-        rdelays = std::generate_n(rdelays, rem, [&offset,gen_lfo] { return gen_lfo(offset++); });
+        const auto rem = std::min(todo-i, std::size_t{lfo_range-offset});
+        rdelays = std::generate_n(rdelays, rem, [&offset, gen_lfo]{ return gen_lfo(offset++); });
         if(offset == lfo_range) offset = 0;
         i += rem;
     }
@@ -307,8 +309,9 @@ void ChorusState::calcSinusoidDelays(const size_t todo)
 
     auto gen_lfo = [lfo_scale,depth,delay](unsigned const offset) -> unsigned
     {
-        auto const offset_norm = float{static_cast<float>(offset) * lfo_scale};
-        return static_cast<unsigned>(fastf2i(std::sin(offset_norm)*depth) + delay);
+        auto const offset_norm = static_cast<float>(offset) * lfo_scale;
+        auto const lfo = al::saturating_cast<int>(std::sin(offset_norm) * depth);
+        return static_cast<unsigned>(lfo + delay);
     };
 
     auto offset = mLfoOffset;
@@ -316,8 +319,8 @@ void ChorusState::calcSinusoidDelays(const size_t todo)
     auto ldelays = mModDelays[0].begin();
     for(size_t i{0};i < todo;)
     {
-        const auto rem = std::min(todo-i, size_t{lfo_range-offset});
-        ldelays = std::generate_n(ldelays, rem, [&offset,gen_lfo] { return gen_lfo(offset++); });
+        const auto rem = std::min(todo-i, std::size_t{lfo_range-offset});
+        ldelays = std::generate_n(ldelays, rem, [&offset, gen_lfo]{ return gen_lfo(offset++); });
         if(offset == lfo_range) offset = 0;
         i += rem;
     }
@@ -326,8 +329,8 @@ void ChorusState::calcSinusoidDelays(const size_t todo)
     auto rdelays = mModDelays[1].begin();
     for(size_t i{0};i < todo;)
     {
-        const auto rem = std::min(todo-i, size_t{lfo_range-offset});
-        rdelays = std::generate_n(rdelays, rem, [&offset,gen_lfo] { return gen_lfo(offset++); });
+        const auto rem = std::min(todo-i, std::size_t{lfo_range-offset});
+        rdelays = std::generate_n(rdelays, rem, [&offset, gen_lfo]{ return gen_lfo(offset++); });
         if(offset == lfo_range) offset = 0;
         i += rem;
     }
@@ -444,8 +447,8 @@ struct ChorusStateFactory final : public EffectStateFactory {
 
 } // namespace
 
-auto ChorusStateFactory_getFactory() -> gsl::not_null<EffectStateFactory*>
+auto ChorusStateFactory_getFactory() -> EffectStateFactory&
 {
-    static ChorusStateFactory ChorusFactory{};
-    return gsl::make_not_null(&ChorusFactory);
+    static auto ChorusFactory = ChorusStateFactory{};
+    return ChorusFactory;
 }

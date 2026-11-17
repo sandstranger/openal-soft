@@ -9,22 +9,13 @@
 #include <string_view>
 #include <utility>
 
-#include "AL/efx.h"
-
-#include "al/auxeffectslot.h"
-#include "al/debug.h"
-#include "al/source.h"
-#include "al/effect.h"
-#include "al/event.h"
-#include "al/listener.h"
 #include "alc/alu.h"
 #include "alc/backends/base.hpp"
 #include "atomic.h"
 #include "core/async_event.h"
-#include "core/effectslot.h"
 #include "core/voice_change.h"
 #include "flexarray.h"
-#include "ringbuffer.h"
+#include "intrusive_ptr.h"
 #include "vecmat.h"
 #include "zudl.hpp"
 
@@ -43,13 +34,21 @@ import eax.validator;
 #endif // ALSOFT_EAX
 
 #if HAVE_CXXMODULES
+import al.iface;
 import alc.context;
 import alc.device;
 import fmtlib;
 import gsl;
 import logging;
 import numeric;
+import ringbuffer;
 #else
+#include "al/auxeffectslot.h"
+#include "al/debug.h"
+#include "al/effect.h"
+#include "al/event.h"
+#include "al/listener.h"
+#include "al/source.h"
 #include "alc/context.hpp"
 #include "alc/device.h"
 #include "core/logging.h"
@@ -57,6 +56,7 @@ import numeric;
 #include "fmt/ranges.h"
 #include "gsl/gsl"
 #include "numeric.hpp"
+#include "ringbuffer.hpp"
 #endif
 
 namespace {

@@ -43,8 +43,6 @@
 #include "althrd_setname.h"
 #include "comptr.h"
 #include "dynload.h"
-#include "inout_ptr.hpp"
-#include "ringbuffer.h"
 
 /* MinGW-w64 needs this for some unknown reason now. */
 using LPCWAVEFORMATEX = const WAVEFORMATEX*;
@@ -86,8 +84,10 @@ import core.device;
 import core.helpers;
 import format;
 import gsl;
+import inout_ptr;
 import logging;
 import numeric;
+import ringbuffer;
 import zstring_view;
 #else
 #include "alc/backends/exception.hpp"
@@ -98,7 +98,9 @@ import zstring_view;
 #include "core/helpers.hpp"
 #include "core/logging.h"
 #include "gsl/gsl"
+#include "inout_ptr.hpp"
 #include "numeric.hpp"
+#include "ringbuffer.hpp"
 #endif
 
 namespace {

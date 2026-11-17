@@ -33,7 +33,6 @@
 
 #include "alc/effects/base.h"
 #include "alcomplex.h"
-#include "core/ambidefs.h"
 #include "core/bufferline.h"
 #include "core/effects/base.h"
 #include "core/effectslot.h"
@@ -44,11 +43,13 @@
 #include "zudl.hpp"
 
 #if HAVE_CXXMODULES
+import core.ambi_utils;
 import core.context;
 import core.device;
 import numeric;
 import window.hann;
 #else
+#include "core/ambi_utils.hpp"
 #include "core/context.h"
 #include "core/device.h"
 #include "hann_window.hpp"
@@ -98,8 +99,8 @@ auto &gWindow = gHannWindow<HilSize>;
 
 struct FshifterState final : EffectState {
     /* Effect parameters */
-    size_t mCount{};
-    size_t mPos{};
+    std::size_t mCount{};
+    std::size_t mPos{};
 
     struct ProcessParams {
         /* Effects buffers */
@@ -182,7 +183,7 @@ void FshifterState::update(const ContextBase *context, const EffectSlotBase *slo
 
     const auto step = props.Frequency / static_cast<float>(device.mSampleRate);
     std::ranges::fill(mChans | std::views::transform(&ProcessParams::mPhaseStep),
-        fastf2u(std::min(step, 1.0f) * MixerFracOne));
+        al::saturating_round<unsigned>(std::min(step, 1.0f) * MixerFracOne));
 
     auto const lchans = std::span{mChans}.first(2);
     switch(props.LeftDirection)
@@ -376,8 +377,8 @@ struct FshifterStateFactory final : public EffectStateFactory {
 
 } // namespace
 
-auto FshifterStateFactory_getFactory() -> gsl::not_null<EffectStateFactory*>
+auto FshifterStateFactory_getFactory() -> EffectStateFactory&
 {
-    static FshifterStateFactory FshifterFactory{};
-    return gsl::make_not_null(&FshifterFactory);
+    static auto FshifterFactory = FshifterStateFactory{};
+    return FshifterFactory;
 }
